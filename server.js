@@ -9,6 +9,9 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const ASSISTANT_ID = process.env.ASSISTANT_ID;
+
 app.post('/create-thread', async (req, res) => {
   try {
     const response = await axios.post(
@@ -16,26 +19,21 @@ app.post('/create-thread', async (req, res) => {
       {},
       {
         headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
           'OpenAI-Beta': 'assistants=v2',
-          'Content-Type': 'application/json',
         },
       }
     );
-
-    const thread_id = response.data.id;
-    res.json({ thread_id });
+    res.json({ thread_id: response.data.id });
   } catch (error) {
-    console.error('Ошибка создания thread:', error?.response?.data || error.message);
-    res.status(500).json({ error: 'Ошибка при создании потока.' });
+    console.error('Ошибка при создании thread:', error.message);
+    res.status(500).json({ error: 'Ошибка создания thread' });
   }
 });
 
-app.post('/chat', async (req, res) => {
+app.post('/add-message', async (req, res) => {
   const { thread_id, message } = req.body;
-
   try {
-    // Добавляем сообщение в thread
     await axios.post(
       `https://api.openai.com/v1/threads/${thread_id}/messages`,
       {
@@ -44,51 +42,97 @@ app.post('/chat', async (req, res) => {
       },
       {
         headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
           'OpenAI-Beta': 'assistants=v2',
-          'Content-Type': 'application/json',
         },
       }
     );
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Ошибка при добавлении сообщения:', error.message);
+    res.status(500).json({ error: 'Ошибка добавления сообщения' });
+  }
+});
 
-    // Запускаем assistant
-    const response = await fetch(`https://api.openai.com/v1/threads/${thread_id}/runs`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        'OpenAI-Beta': 'assistants=v2',
-        'Content-Type': 'application/json',
+app.post('/run-assistant', async (req, res) => {
+  const { thread_id } = req.body;
+  try {
+    const response = await axios.post(
+      `https://api.openai.com/v1/threads/${thread_id}/runs`,
+      {
+        assistant_id: ASSISTANT_ID,
       },
-      body: JSON.stringify({
-        assistant_id: process.env.ASSISTANT_ID,
-        stream: true,
-      }),
-    });
+      {
+        headers: {
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
+          'OpenAI-Beta': 'assistants=v2',
+        },
+      }
+    );
+    res.json({ run_id: response.data.id });
+  } catch (error) {
+    console.error('Ошибка при запуске ассистента:', error.message);
+    res.status(500).json({ error: 'Ошибка запуска ассистента' });
+  }
+});
 
-    const controller = new AbortController();
-    req.on('close', () => controller.abort());
-
+app.post('/get-response-stream', async (req, res) => {
+  const { thread_id, run_id } = req.body;
+  try {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
 
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder('utf-8');
+    const interval = setInterval(async () => {
+      try {
+        const runStatus = await axios.get(
+          `https://api.openai.com/v1/threads/${thread_id}/runs/${run_id}`,
+          {
+            headers: {
+              Authorization: `Bearer ${OPENAI_API_KEY}`,
+              'OpenAI-Beta': 'assistants=v2',
+            },
+          }
+        );
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const chunk = decoder.decode(value, { stream: true });
-      res.write(chunk);
-    }
+        if (runStatus.data.status === 'completed') {
+          clearInterval(interval);
 
-    res.end();
-  } catch (err) {
-    console.error('Ошибка при обработке запроса:', err.message);
-    res.status(500).json({ error: 'Ошибка сервера при запуске ассистента.' });
+          const messages = await axios.get(
+            `https://api.openai.com/v1/threads/${thread_id}/messages`,
+            {
+              headers: {
+                Authorization: `Bearer ${OPENAI_API_KEY}`,
+                'OpenAI-Beta': 'assistants=v2',
+              },
+            }
+          );
+
+          const lastMessage = messages.data.data.find(
+            (msg) => msg.role === 'assistant'
+          );
+
+          if (lastMessage) {
+            res.write(`data: ${lastMessage.content[0].text.value}\n\n`);
+          } else {
+            res.write('data: [No message from assistant]\n\n');
+          }
+
+          res.end();
+        }
+      } catch (err) {
+        clearInterval(interval);
+        console.error('Ошибка в потоке:', err.message);
+        res.write('data: [Ошибка получения ответа от OpenAI]\n\n');
+        res.end();
+      }
+    }, 1000);
+  } catch (error) {
+    console.error('Ошибка в stream:', error.message);
+    res.status(500).end();
   }
 });
 
 app.listen(PORT, () => {
-  console.log(`✅ SSE proxy listening on http://localhost:${PORT}`);
+  console.log(`✅ SSE Proxy Server listening on http://localhost:${PORT}`);
 });
