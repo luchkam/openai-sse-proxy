@@ -1,3 +1,4 @@
+// server.js
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
@@ -50,23 +51,19 @@ async function handleFunctionCall(threadId, funcCall) {
   const resultUrl = `http://tourvisor.ru/xml/result.php?authlogin=info@meridiantt.com&authpass=Mh4GdKPUtwZT&type=result&format=json`;
 
   try {
-    // Этап 1: Запуск поиска
     const searchRes = await axios.get(searchUrl);
     const requestId = searchRes.data?.result?.requestid;
     if (!requestId) return 'Не удалось запустить поиск туров.';
 
-    // Этап 2: Ожидание 5 сек
     await new Promise((resolve) => setTimeout(resolve, 5000));
 
-    // Этап 3: Получение результатов
     const resultRes = await axios.get(`${resultUrl}&requestid=${requestId}`);
     const hotels = resultRes.data?.result?.hotel;
 
     if (!hotels || hotels.length === 0) return 'По данному запросу туров не найдено.';
 
-    // Подготовим текстовый результат
-    const reply = hotels.slice(0, 3).map((hotel, i) => {
-      const tour = hotel.tours?.[0];
+    const reply = hotels.slice(0, 3).map((hotel) => {
+      const tour = hotel.tours?.tour?.[0];
       return `🏨 ${hotel.hotelname} (${hotel.hotelstars}★, ${hotel.regionname}) — от ${tour.price} руб. (${tour.nights} ночей, питание: ${tour.mealrussian})`;
     }).join('\n\n');
 
@@ -91,8 +88,6 @@ app.get('/ask', async (req, res) => {
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
 
-  let buffer = '';
-
   try {
     const run = await axios.post(
       `https://api.openai.com/v1/threads/${threadId}/runs`,
@@ -114,7 +109,6 @@ app.get('/ask', async (req, res) => {
 
     run.data.on('data', async (chunk) => {
       const lines = chunk.toString().split('\n');
-
       for (const line of lines) {
         if (!line.startsWith('data: ')) continue;
         const jsonStr = line.slice(6);
@@ -130,7 +124,6 @@ app.get('/ask', async (req, res) => {
         if (funcCall) {
           const resultText = await handleFunctionCall(threadId, funcCall);
 
-          // Отправляем результат ассистенту как сообщение
           await axios.post(
             `https://api.openai.com/v1/threads/${threadId}/messages`,
             {
@@ -146,7 +139,6 @@ app.get('/ask', async (req, res) => {
             }
           );
 
-          // Запускаем новый run после функции
           const newRun = await axios.post(
             `https://api.openai.com/v1/threads/${threadId}/runs`,
             { assistant_id: process.env.ASSISTANT_ID, stream: true },
@@ -176,7 +168,7 @@ app.get('/ask', async (req, res) => {
             res.end();
           });
 
-          return; // выходим из текущего on('data'), ждём новый поток
+          return;
         } else {
           res.write(`data: ${jsonStr}\n\n`);
         }
