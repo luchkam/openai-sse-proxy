@@ -1,4 +1,3 @@
-// server.js
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
@@ -6,13 +5,15 @@ require('dotenv').config();
 
 const app = express();
 
-// ✅ Настройка CORS строго для turpoisk.kz
-app.use(cors({
-  origin: 'https://turpoisk.kz',
-  methods: 'GET,POST',
-  allowedHeaders: 'Content-Type',
-}));
+// ✅ Настройка CORS (добавлен GET)
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', 'https://turpoisk.kz');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  next();
+});
 
+app.use(cors());
 app.use(express.json());
 
 // === Новый endpoint для создания потока ===
@@ -69,9 +70,9 @@ async function handleFunctionCall(threadId, funcCall) {
 
     if (!hotels || hotels.length === 0) return 'По данному запросу туров не найдено.';
 
-    const reply = hotels.slice(0, 3).map((hotel) => {
+    const reply = hotels.slice(0, 3).map((hotel, i) => {
       const tour = hotel.tours?.[0];
-      return `🏨 ${hotel.hotelname} (${hotel.hotelstars}★, ${hotel.regionname}) — от ${tour.price} тенге (${tour.nights} ночей, питание: ${tour.mealrussian})`;
+      return `🏨 ${hotel.hotelname} (${hotel.hotelstars}★, ${hotel.regionname}) — от ${tour.price} руб. (${tour.nights} ночей, питание: ${tour.mealrussian})`;
     }).join('\n\n');
 
     return reply || 'Поиск завершен, но туров не найдено.';
@@ -94,6 +95,8 @@ app.get('/ask', async (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
+
+  let buffer = '';
 
   try {
     const run = await axios.post(
