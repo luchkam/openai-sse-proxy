@@ -5,10 +5,14 @@ const cors = require('cors');
 require('dotenv').config();
 
 const app = express();
+
+// ✅ Настройка CORS строго для turpoisk.kz
 app.use(cors({
-  origin: 'https://turpoisk.kz',  // Разрешаем только этот сайт
+  origin: 'https://turpoisk.kz',
   methods: 'GET,POST',
   allowedHeaders: 'Content-Type',
+}));
+
 app.use(express.json());
 
 // === Новый endpoint для создания потока ===
@@ -66,8 +70,8 @@ async function handleFunctionCall(threadId, funcCall) {
     if (!hotels || hotels.length === 0) return 'По данному запросу туров не найдено.';
 
     const reply = hotels.slice(0, 3).map((hotel) => {
-      const tour = hotel.tours?.tour?.[0];
-      return `🏨 ${hotel.hotelname} (${hotel.hotelstars}★, ${hotel.regionname}) — от ${tour.price} руб. (${tour.nights} ночей, питание: ${tour.mealrussian})`;
+      const tour = hotel.tours?.[0];
+      return `🏨 ${hotel.hotelname} (${hotel.hotelstars}★, ${hotel.regionname}) — от ${tour.price} тенге (${tour.nights} ночей, питание: ${tour.mealrussian})`;
     }).join('\n\n');
 
     return reply || 'Поиск завершен, но туров не найдено.';
@@ -111,8 +115,8 @@ app.get('/ask', async (req, res) => {
     );
 
     run.data.on('data', async (chunk) => {
-      console.log('Получен фрагмент:', chunk.toString());
       const lines = chunk.toString().split('\n');
+
       for (const line of lines) {
         if (!line.startsWith('data: ')) continue;
         const jsonStr = line.slice(6);
