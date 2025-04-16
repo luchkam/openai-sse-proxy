@@ -5,7 +5,10 @@ const cors = require('cors');
 require('dotenv').config();
 
 const app = express();
-app.use(cors());
+app.use(cors({
+  origin: 'https://turpoisk.kz',  // Разрешаем только этот сайт
+  methods: 'GET,POST',
+  allowedHeaders: 'Content-Type',
 app.use(express.json());
 
 // === Новый endpoint для создания потока ===
