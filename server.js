@@ -5,9 +5,9 @@ require('dotenv').config();
 
 const app = express();
 
-// === Явные заголовки CORS ===
+// === CORS заголовки (в том числе для SSE + Render) ===
 app.use((req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin', '*'); // или 'https://turpoisk.kz'
+  res.setHeader('Access-Control-Allow-Origin', '*'); // Можно заменить на 'https://turpoisk.kz'
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   next();
@@ -16,7 +16,7 @@ app.use((req, res, next) => {
 app.use(cors());
 app.use(express.json());
 
-// === Создание нового thread ===
+// === Новый endpoint для создания потока ===
 app.get('/new-thread', async (req, res) => {
   try {
     const response = await axios.post(
@@ -36,7 +36,7 @@ app.get('/new-thread', async (req, res) => {
   }
 });
 
-// === Обработчик search_tours через Tourvisor ===
+// === Обработка search_tours (TOP 3 по цене) ===
 async function handleFunctionCall(threadId, funcCall) {
   if (funcCall.name !== 'search_tours') return null;
 
@@ -71,17 +71,14 @@ async function handleFunctionCall(threadId, funcCall) {
     if (!requestId) return '❌ Не удалось запустить поиск туров.';
     console.log('🔍 Request ID:', requestId);
 
-    // 2. Ожидание завершения поиска
+    // 2. Ожидание завершения
     const statusUrl = `${resultBaseUrl}&requestid=${requestId}&type=status`;
-    const maxAttempts = 4;
-    let status = null;
-
-    for (let i = 0; i < maxAttempts; i++) {
+    for (let i = 0; i < 4; i++) {
       await new Promise((r) => setTimeout(r, 2000));
       const statusRes = await axios.get(statusUrl);
-      status = statusRes.data?.status?.state;
-      console.log(`⌛ Статус поиска [${i + 1}/${maxAttempts}]:`, status);
-      if (status === 'finished') break;
+      const state = statusRes.data?.status?.state;
+      console.log(`⌛ Статус поиска [${i + 1}/4]:`, state);
+      if (state === 'finished') break;
     }
 
     // 3. Получение результата
@@ -91,20 +88,49 @@ async function handleFunctionCall(threadId, funcCall) {
 
     if (!hotels || hotels.length === 0) return '😞 По данному запросу туров не найдено.';
 
-    const reply = hotels.slice(0, 3).map((hotel) => {
-      const tour = hotel.tours?.[0];
-      if (!tour) return null;
-      return `🏨 ${hotel.hotelname} (${hotel.hotelstars}★, ${hotel.regionname}) — от ${tour.price} руб. (${tour.nights} ночей, питание: ${tour.mealrussian})`;
-    }).filter(Boolean).join('\n\n');
+    // 4. Сбор всех туров
+    const allTours = [];
 
-    return reply || '🔎 Поиск завершён, но туров не найдено.';
+    for (const hotel of hotels) {
+      const hotelName = hotel.hotelname || 'Без названия';
+      const region = hotel.regionname || '';
+      const stars = hotel.hotelstars || '-';
+
+      const tours = hotel.tours?.tour || hotel.tours || [];
+      const normalized = Array.isArray(tours) ? tours : [tours];
+
+      for (const tour of normalized) {
+        allTours.push({
+          price: tour.price || 999999999,
+          nights: tour.nights,
+          flydate: tour.flydate,
+          meal: tour.mealrussian,
+          room: tour.room,
+          hotelName,
+          region,
+          stars,
+        });
+      }
+    }
+
+    if (allTours.length === 0) return '😞 Найдено 0 туров.';
+
+    // 5. Топ-3 по цене
+    const top = allTours.sort((a, b) => a.price - b.price).slice(0, 3);
+
+    // 6. Формируем красивый текст
+    const reply = top.map((t, i) => {
+      return `${i + 1}. 🏨 ${t.hotelName} (${t.stars}★, ${t.region}) — от ${t.price.toLocaleString()} KZT\n   - ${t.flydate}, ${t.nights} ночей, ${t.meal}, номер: ${t.room}`;
+    }).join('\n\n');
+
+    return reply;
   } catch (err) {
     console.error('❌ Ошибка в search_tours:', err.message);
     return '🚫 Произошла ошибка при поиске туров.';
   }
 }
 
-// === SSE /ask endpoint ===
+// === SSE endpoint ===
 app.get('/ask', async (req, res) => {
   const userMessage = req.query.message;
   const threadId = req.query.thread_id;
@@ -117,9 +143,8 @@ app.get('/ask', async (req, res) => {
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
 
-  // 🧠 Keep-alive для Render
   const keepAliveInterval = setInterval(() => {
-    res.write(':\n\n'); // SSE-комментарий
+    res.write(':\n\n');
   }, 10000);
 
   let finished = false;
@@ -162,7 +187,6 @@ app.get('/ask', async (req, res) => {
           const funcCall = data?.function_call;
 
           if (funcCall) {
-            console.log('⚙️ Вызов функции:', funcCall.name);
             const resultText = await handleFunctionCall(threadId, funcCall);
 
             await axios.post(
