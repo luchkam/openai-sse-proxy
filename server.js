@@ -1,10 +1,12 @@
-// Новый server.js с логированием аргументов и явным завершением потока
+// Обновлённый server.js с полной диагностикой (не редактировать без необходимости)
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
 require('dotenv').config();
 
 const app = express();
+app.use(cors());
+app.use(express.json());
 
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -13,40 +15,31 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(cors());
-app.use(express.json());
-
+// Новый поток
 app.get('/new-thread', async (req, res) => {
   try {
-    const response = await axios.post(
-      'https://api.openai.com/v1/threads',
-      {},
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-          'OpenAI-Beta': 'assistants=v2',
-        },
+    const response = await axios.post('https://api.openai.com/v1/threads', {}, {
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        'OpenAI-Beta': 'assistants=v2'
       }
-    );
+    });
     res.json({ thread_id: response.data.id });
   } catch (err) {
-    res.status(500).json({ error: 'Не удалось создать thread_id' });
+    console.error('Ошибка создания thread:', err);
+    res.status(500).json({ error: 'Thread create failed' });
   }
 });
 
+// Поиск туров
 async function handleFunctionCall(threadId, funcCall) {
   if (funcCall.name !== 'search_tours') return null;
-
   try {
     const args = JSON.parse(funcCall.arguments);
-    console.log('📦 Аргументы:', JSON.stringify(args, null, 2));
+    console.log('📦 Аргументы:', args);
 
-    const auth = {
-      authlogin: 'info@meridiantt.com',
-      authpass: 'Mh4GdKPUtwZT',
-    };
-
-    const queryParams = new URLSearchParams({
+    const auth = { authlogin: 'info@meridiantt.com', authpass: 'Mh4GdKPUtwZT' };
+    const searchParams = new URLSearchParams({
       ...auth,
       departure: args.departure,
       country: args.country,
@@ -56,62 +49,57 @@ async function handleFunctionCall(threadId, funcCall) {
       nightsto: args.nightsto || 10,
       adults: args.adults || 2,
       child: args.child || 0,
-      format: 'json',
+      format: 'json'
     });
 
-    const searchUrl = `http://tourvisor.ru/xml/search.php?${queryParams.toString()}`;
-    const resultBaseUrl = `http://tourvisor.ru/xml/result.php?${new URLSearchParams(auth)}&format=json`;
+    const searchUrl = `http://tourvisor.ru/xml/search.php?${searchParams}`;
+    const baseResultUrl = `http://tourvisor.ru/xml/result.php?${new URLSearchParams(auth)}&format=json`;
 
     const searchRes = await axios.get(searchUrl);
     const requestId = searchRes.data?.result?.requestid;
-    if (!requestId) return '❌ Не удалось запустить поиск туров.';
+    if (!requestId) return '❌ Не удалось запустить поиск туров';
 
-    const statusUrl = `${resultBaseUrl}&requestid=${requestId}&type=status`;
+    const statusUrl = `${baseResultUrl}&requestid=${requestId}&type=status`;
     for (let i = 0; i < 4; i++) {
-      await new Promise((r) => setTimeout(r, 2000));
-      const statusRes = await axios.get(statusUrl);
-      if (statusRes.data?.status?.state === 'finished') break;
+      await new Promise(r => setTimeout(r, 2000));
+      const status = await axios.get(statusUrl);
+      if (status.data?.status?.state === 'finished') break;
     }
 
-    const resultUrl = `${resultBaseUrl}&requestid=${requestId}&type=result`;
-    const resultRes = await axios.get(resultUrl);
-    const hotels = resultRes.data?.result?.hotel;
-
-    if (!hotels || hotels.length === 0) return '😞 По данному запросу туров не найдено.';
+    const resultUrl = `${baseResultUrl}&requestid=${requestId}&type=result`;
+    const result = await axios.get(resultUrl);
+    const hotels = result.data?.result?.hotel;
+    if (!hotels || !hotels.length) return '😞 Туров не найдено';
 
     const allTours = [];
     for (const hotel of hotels) {
-      const hotelName = hotel.hotelname || 'Без названия';
-      const region = hotel.regionname || '';
-      const stars = hotel.hotelstars || '-';
-      const tours = hotel.tours?.tour || hotel.tours || [];
-      const normalized = Array.isArray(tours) ? tours : [tours];
-      for (const tour of normalized) {
+      const hotelName = hotel.hotelname;
+      const region = hotel.regionname;
+      const stars = hotel.hotelstars;
+      const tours = Array.isArray(hotel.tours?.tour) ? hotel.tours.tour : [hotel.tours?.tour];
+      for (const t of tours) {
         allTours.push({
-          price: tour.price || 999999999,
-          nights: tour.nights,
-          flydate: tour.flydate,
-          meal: tour.mealrussian,
-          room: tour.room,
+          price: t.price,
+          nights: t.nights,
+          flydate: t.flydate,
+          meal: t.mealrussian,
+          room: t.room,
           hotelName,
           region,
-          stars,
+          stars
         });
       }
     }
 
     const top = allTours.sort((a, b) => a.price - b.price).slice(0, 3);
-    const reply = top.map((t, i) => {
-      return `${i + 1}. 🏨 ${t.hotelName} (${t.stars}★, ${t.region}) — от ${t.price.toLocaleString()} KZT\n   - ${t.flydate}, ${t.nights} ночей, ${t.meal}, номер: ${t.room}`;
-    }).join('\n\n');
-
-    return reply;
+    return top.map((t, i) => `${i + 1}. 🏨 ${t.hotelName} (${t.stars}★, ${t.region}) — от ${t.price.toLocaleString()} KZT\n   - ${t.flydate}, ${t.nights} ночей, ${t.meal}, номер: ${t.room}`).join('\n\n');
   } catch (err) {
-    console.error('❌ Ошибка в search_tours:', err.message);
-    return '🚫 Произошла ошибка при поиске туров.';
+    console.error('❌ Ошибка в handleFunctionCall:', err);
+    return '🚫 Ошибка поиска тура';
   }
 }
 
+// SSE-обработка
 app.get('/ask', async (req, res) => {
   const { message, thread_id } = req.query;
   if (!thread_id) return res.status(400).json({ error: 'thread_id отсутствует' });
@@ -121,7 +109,12 @@ app.get('/ask', async (req, res) => {
   res.setHeader('Connection', 'keep-alive');
 
   const keepAlive = setInterval(() => res.write(':\n\n'), 10000);
-  const finish = () => { clearInterval(keepAlive); res.write('data: [DONE]\n\n'); res.end(); };
+
+  const finish = () => {
+    clearInterval(keepAlive);
+    res.write('data: [DONE]\n\n');
+    res.end();
+  };
 
   try {
     const run = await axios.post(
@@ -129,14 +122,14 @@ app.get('/ask', async (req, res) => {
       {
         assistant_id: process.env.ASSISTANT_ID,
         stream: true,
-        additional_messages: [{ role: 'user', content: message }],
+        additional_messages: [{ role: 'user', content: message }]
       },
       {
         headers: {
           Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-          'OpenAI-Beta': 'assistants=v2',
+          'OpenAI-Beta': 'assistants=v2'
         },
-        responseType: 'stream',
+        responseType: 'stream'
       }
     );
 
@@ -157,13 +150,13 @@ app.get('/ask', async (req, res) => {
             isFunctionCall = true;
             functionCallName = data.function_call.name;
             functionCallBuffer += data.function_call.arguments || '';
-            return;
+            continue;
           }
           if (!isFunctionCall && data.delta?.content) {
             res.write(`data: ${JSON.stringify(data)}\n\n`);
           }
-        } catch (err) {
-          console.warn('Ошибка парсинга JSON:', err.message);
+        } catch (e) {
+          console.warn('Ошибка парсинга JSON:', e.message);
         }
       }
     });
@@ -171,56 +164,50 @@ app.get('/ask', async (req, res) => {
     run.data.on('end', async () => {
       if (!isFunctionCall) return finish();
 
-      try {
-        const funcCall = {
-          name: functionCallName,
-          arguments: functionCallBuffer,
-        };
-        console.log('📦 Итоговые аргументы:', functionCallBuffer);
+      const funcCall = { name: functionCallName, arguments: functionCallBuffer };
+      const resultText = await handleFunctionCall(thread_id, funcCall);
 
-        const resultText = await handleFunctionCall(thread_id, funcCall);
-
-        await axios.post(`https://api.openai.com/v1/threads/${thread_id}/messages`, {
+      await axios.post(
+        `https://api.openai.com/v1/threads/${thread_id}/messages`,
+        {
           role: 'function',
           name: funcCall.name,
-          content: resultText || 'Ошибка обработки',
-        }, {
+          content: resultText || 'Ошибка обработки'
+        },
+        {
           headers: {
             Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-            'OpenAI-Beta': 'assistants=v2',
-          },
-        });
-
-        const newRun = await axios.post(`https://api.openai.com/v1/threads/${thread_id}/runs`, {
-          assistant_id: process.env.ASSISTANT_ID,
-          stream: true,
-        }, {
-          headers: {
-            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-            'OpenAI-Beta': 'assistants=v2',
-          },
-          responseType: 'stream',
-        });
-
-        newRun.data.on('data', (chunk2) => {
-          const lines2 = chunk2.toString().split('\n');
-          for (const line2 of lines2) {
-            if (line2.startsWith('data: ')) {
-              const jsonStr2 = line2.slice(6);
-              if (jsonStr2 !== '[DONE]') res.write(`data: ${jsonStr2}\n\n`);
-            }
+            'OpenAI-Beta': 'assistants=v2'
           }
-        });
+        }
+      );
 
-        newRun.data.on('end', finish);
-      } catch (err) {
-        console.error('Ошибка после function_call:', err.message);
-        finish();
-      }
+      const secondRun = await axios.post(
+        `https://api.openai.com/v1/threads/${thread_id}/runs`,
+        { assistant_id: process.env.ASSISTANT_ID, stream: true },
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+            'OpenAI-Beta': 'assistants=v2'
+          },
+          responseType: 'stream'
+        }
+      );
+
+      secondRun.data.on('data', chunk => {
+        const lines = chunk.toString().split('\n');
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const payload = line.slice(6);
+            if (payload !== '[DONE]') res.write(`data: ${payload}\n\n`);
+          }
+        }
+      });
+      secondRun.data.on('end', finish);
     });
   } catch (err) {
-    console.error('🔥 Ошибка в /ask:', err.message);
-    res.write(`data: {\"error\":\"${err.message}\"}\n\n`);
+    console.error('🔥 Ошибка в /ask:', err);
+    res.write(`data: {"error":"${err.message}"}\n\n`);
     finish();
   }
 });
