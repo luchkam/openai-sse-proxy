@@ -64,7 +64,6 @@ async function handleFunctionCall(threadId, funcCall) {
     const searchUrl = `http://tourvisor.ru/xml/search.php?${queryParams.toString()}`;
     const resultBaseUrl = `http://tourvisor.ru/xml/result.php?${new URLSearchParams(auth)}&format=json`;
 
-    // Запрос
     const searchRes = await axios.get(searchUrl);
     const requestId = searchRes.data?.result?.requestid;
     if (!requestId) return '❌ Не удалось запустить поиск туров.';
@@ -118,7 +117,6 @@ async function handleFunctionCall(threadId, funcCall) {
 // === SSE /ask ===
 app.get('/ask', async (req, res) => {
   const { message, thread_id } = req.query;
-
   if (!thread_id) return res.status(400).json({ error: 'thread_id отсутствует' });
 
   res.setHeader('Content-Type', 'text/event-stream');
@@ -171,12 +169,11 @@ app.get('/ask', async (req, res) => {
         try {
           const data = JSON.parse(jsonStr);
           if (data.function_call) {
-  console.log('👉 RAW function_call chunk:', JSON.stringify(data, null, 2));
-  isFunctionCall = true;
-  functionCallName = data.function_call.name;
-  functionCallBuffer += data.function_call.arguments || '';
-  return;
-}
+            isFunctionCall = true;
+            functionCallName = data.function_call.name;
+            functionCallBuffer += data.function_call.arguments || '';
+            return;
+          }
 
           if (!isFunctionCall && data.delta?.content) {
             res.write(`data: ${JSON.stringify(data)}\n\n`);
