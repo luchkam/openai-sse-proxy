@@ -5,9 +5,9 @@ require('dotenv').config();
 
 const app = express();
 
-// ===== Явные CORS-заголовки =====
+// === Явные заголовки CORS ===
 app.use((req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin', '*'); // или строго: 'https://turpoisk.kz'
+  res.setHeader('Access-Control-Allow-Origin', '*'); // или 'https://turpoisk.kz'
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   next();
@@ -16,7 +16,7 @@ app.use((req, res, next) => {
 app.use(cors());
 app.use(express.json());
 
-// === Новый endpoint для создания потока ===
+// === Создание нового thread ===
 app.get('/new-thread', async (req, res) => {
   try {
     const response = await axios.post(
@@ -36,7 +36,7 @@ app.get('/new-thread', async (req, res) => {
   }
 });
 
-// === Обработчик вызова функции поиска туров через Tourvisor ===
+// === Обработчик search_tours через Tourvisor ===
 async function handleFunctionCall(threadId, funcCall) {
   if (funcCall.name !== 'search_tours') return null;
 
@@ -65,29 +65,26 @@ async function handleFunctionCall(threadId, funcCall) {
     const searchUrl = `http://tourvisor.ru/xml/search.php?${queryParams.toString()}`;
     const resultBaseUrl = `http://tourvisor.ru/xml/result.php?${new URLSearchParams(auth)}&format=json`;
 
-    // Этап 1: запуск поиска
+    // 1. Старт поиска
     const searchRes = await axios.get(searchUrl);
     const requestId = searchRes.data?.result?.requestid;
     if (!requestId) return '❌ Не удалось запустить поиск туров.';
-
     console.log('🔍 Request ID:', requestId);
 
-    // Этап 2: ждём завершения поиска через status
+    // 2. Ожидание завершения поиска
     const statusUrl = `${resultBaseUrl}&requestid=${requestId}&type=status`;
     const maxAttempts = 4;
     let status = null;
 
     for (let i = 0; i < maxAttempts; i++) {
-      await new Promise((r) => setTimeout(r, 2000)); // пауза 2 сек
-
+      await new Promise((r) => setTimeout(r, 2000));
       const statusRes = await axios.get(statusUrl);
       status = statusRes.data?.status?.state;
-      console.log(`⌛ Статус [${i + 1}/${maxAttempts}]:`, status);
-
+      console.log(`⌛ Статус поиска [${i + 1}/${maxAttempts}]:`, status);
       if (status === 'finished') break;
     }
 
-    // Этап 3: Получение результатов
+    // 3. Получение результата
     const resultUrl = `${resultBaseUrl}&requestid=${requestId}&type=result`;
     const resultRes = await axios.get(resultUrl);
     const hotels = resultRes.data?.result?.hotel;
@@ -107,7 +104,7 @@ async function handleFunctionCall(threadId, funcCall) {
   }
 }
 
-// === SSE endpoint ===
+// === SSE /ask endpoint ===
 app.get('/ask', async (req, res) => {
   const userMessage = req.query.message;
   const threadId = req.query.thread_id;
@@ -120,10 +117,15 @@ app.get('/ask', async (req, res) => {
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
 
-  let finished = false;
+  // 🧠 Keep-alive для Render
+  const keepAliveInterval = setInterval(() => {
+    res.write(':\n\n'); // SSE-комментарий
+  }, 10000);
 
+  let finished = false;
   const finish = () => {
     if (!finished) {
+      clearInterval(keepAliveInterval);
       finished = true;
       res.write('data: [DONE]\n\n');
       res.end();
@@ -136,9 +138,7 @@ app.get('/ask', async (req, res) => {
       {
         assistant_id: process.env.ASSISTANT_ID,
         stream: true,
-        additional_messages: [
-          { role: 'user', content: userMessage },
-        ],
+        additional_messages: [{ role: 'user', content: userMessage }],
       },
       {
         headers: {
