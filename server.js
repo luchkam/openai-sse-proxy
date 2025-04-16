@@ -1,4 +1,3 @@
-// server.js
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
@@ -16,24 +15,27 @@ app.use((req, res, next) => {
 app.use(cors());
 app.use(express.json());
 
-// Новый thread
 app.get('/new-thread', async (req, res) => {
   try {
-    const response = await axios.post('https://api.openai.com/v1/threads', {}, {
-      headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        'OpenAI-Beta': 'assistants=v2',
-      },
-    });
+    const response = await axios.post(
+      'https://api.openai.com/v1/threads',
+      {},
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          'OpenAI-Beta': 'assistants=v2',
+        },
+      }
+    );
     res.json({ thread_id: response.data.id });
   } catch (err) {
-    res.status(500).json({ error: 'Не удалось создать thread' });
+    res.status(500).json({ error: 'Не удалось создать thread_id' });
   }
 });
 
-// FunctionCall обработка
 async function handleFunctionCall(threadId, funcCall) {
   if (funcCall.name !== 'search_tours') return null;
+
   try {
     const args = JSON.parse(funcCall.arguments);
     console.log('📦 Аргументы:', args);
@@ -56,25 +58,25 @@ async function handleFunctionCall(threadId, funcCall) {
       format: 'json',
     });
 
-    const searchUrl = `http://tourvisor.ru/xml/search.php?${queryParams}`;
-    const baseUrl = `http://tourvisor.ru/xml/result.php?${new URLSearchParams(auth)}&format=json`;
+    const searchUrl = `http://tourvisor.ru/xml/search.php?${queryParams.toString()}`;
+    const resultBaseUrl = `http://tourvisor.ru/xml/result.php?${new URLSearchParams(auth)}&format=json`;
 
     const searchRes = await axios.get(searchUrl);
     const requestId = searchRes.data?.result?.requestid;
-    if (!requestId) return '❌ Поиск не запустился';
+    if (!requestId) return '❌ Не удалось запустить поиск туров.';
 
-    const statusUrl = `${baseUrl}&requestid=${requestId}&type=status`;
+    const statusUrl = `${resultBaseUrl}&requestid=${requestId}&type=status`;
     for (let i = 0; i < 4; i++) {
-      await new Promise(r => setTimeout(r, 2000));
+      await new Promise((r) => setTimeout(r, 2000));
       const statusRes = await axios.get(statusUrl);
       if (statusRes.data?.status?.state === 'finished') break;
     }
 
-    const resultUrl = `${baseUrl}&requestid=${requestId}&type=result`;
+    const resultUrl = `${resultBaseUrl}&requestid=${requestId}&type=result`;
     const resultRes = await axios.get(resultUrl);
     const hotels = resultRes.data?.result?.hotel;
 
-    if (!hotels || hotels.length === 0) return '😞 Ничего не найдено';
+    if (!hotels || hotels.length === 0) return '😞 По данному запросу туров не найдено.';
 
     const allTours = [];
     for (const hotel of hotels) {
@@ -98,14 +100,17 @@ async function handleFunctionCall(threadId, funcCall) {
     }
 
     const top = allTours.sort((a, b) => a.price - b.price).slice(0, 3);
-    return top.map((t, i) => `${i + 1}. 🏨 ${t.hotelName} (${t.stars}★, ${t.region}) — от ${t.price.toLocaleString()} KZT\n   - ${t.flydate}, ${t.nights} ночей, ${t.meal}, номер: ${t.room}`).join('\n\n');
+    const reply = top.map((t, i) => {
+      return `${i + 1}. 🏨 ${t.hotelName} (${t.stars}★, ${t.region}) — от ${t.price.toLocaleString()} KZT\n   - ${t.flydate}, ${t.nights} ночей, ${t.meal}, номер: ${t.room}`;
+    }).join('\n\n');
+
+    return reply;
   } catch (err) {
-    console.error('❌ Ошибка поиска:', err.message);
-    return '🚫 Ошибка при поиске';
+    console.error('❌ Ошибка в search_tours:', err.message);
+    return '🚫 Произошла ошибка при поиске туров.';
   }
 }
 
-// === /ask endpoint ===
 app.get('/ask', async (req, res) => {
   const { message, thread_id } = req.query;
   if (!thread_id) return res.status(400).json({ error: 'thread_id отсутствует' });
@@ -115,15 +120,15 @@ app.get('/ask', async (req, res) => {
   res.setHeader('Connection', 'keep-alive');
 
   const keepAlive = setInterval(() => res.write(':\n\n'), 10000);
+  let finished = false;
   const finish = () => {
-    clearInterval(keepAlive);
-    res.write('data: [DONE]\n\n');
-    res.end();
+    if (!finished) {
+      finished = true;
+      clearInterval(keepAlive);
+      res.write('data: [DONE]\n\n');
+      res.end();
+    }
   };
-
-  let functionCallBuffer = '';
-  let functionCallName = '';
-  let isFunctionCall = false;
 
   try {
     const run = await axios.post(
@@ -142,23 +147,33 @@ app.get('/ask', async (req, res) => {
       }
     );
 
-    run.data.on('data', chunk => {
+    let functionCallBuffer = '';
+    let functionCallName = null;
+    let isFunctionCall = false;
+
+    run.data.on('data', async (chunk) => {
       const lines = chunk.toString().split('\n');
+
       for (const line of lines) {
         if (!line.startsWith('data: ')) continue;
         const jsonStr = line.slice(6);
-        if (jsonStr === '[DONE]') return;
+        if (jsonStr === '[DONE]') return finish();
+
         try {
           const data = JSON.parse(jsonStr);
           if (data.function_call) {
             isFunctionCall = true;
             functionCallName = data.function_call.name;
             functionCallBuffer += data.function_call.arguments || '';
-          } else if (data.delta?.content && !isFunctionCall) {
+            console.log('📦 RAW chunk:', JSON.stringify(data, null, 2));
+            return;
+          }
+
+          if (!isFunctionCall && data.delta?.content) {
             res.write(`data: ${JSON.stringify(data)}\n\n`);
           }
         } catch (err) {
-          console.warn('JSON ошибка:', err.message);
+          console.warn('Ошибка парсинга JSON:', err.message);
         }
       }
     });
@@ -167,8 +182,13 @@ app.get('/ask', async (req, res) => {
       if (!isFunctionCall) return finish();
 
       try {
-        const funcCall = { name: functionCallName, arguments: functionCallBuffer };
-        console.log('📦 Полный functionCallBuffer:', functionCallBuffer);
+        const funcCall = {
+          name: functionCallName,
+          arguments: functionCallBuffer,
+        };
+
+        console.log('✅ Итог functionCallBuffer:', functionCallBuffer);
+
         const resultText = await handleFunctionCall(thread_id, funcCall);
 
         await axios.post(
@@ -176,7 +196,7 @@ app.get('/ask', async (req, res) => {
           {
             role: 'function',
             name: funcCall.name,
-            content: resultText,
+            content: resultText || 'Ошибка обработки',
           },
           {
             headers: {
@@ -188,7 +208,10 @@ app.get('/ask', async (req, res) => {
 
         const newRun = await axios.post(
           `https://api.openai.com/v1/threads/${thread_id}/runs`,
-          { assistant_id: process.env.ASSISTANT_ID, stream: true },
+          {
+            assistant_id: process.env.ASSISTANT_ID,
+            stream: true,
+          },
           {
             headers: {
               Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
@@ -199,12 +222,12 @@ app.get('/ask', async (req, res) => {
         );
 
         newRun.data.on('data', (chunk2) => {
-          const lines = chunk2.toString().split('\n');
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              const jsonStr = line.slice(6);
-              if (jsonStr !== '[DONE]') {
-                res.write(`data: ${jsonStr}\n\n`);
+          const lines2 = chunk2.toString().split('\n');
+          for (const line2 of lines2) {
+            if (line2.startsWith('data: ')) {
+              const jsonStr2 = line2.slice(6);
+              if (jsonStr2 !== '[DONE]') {
+                res.write(`data: ${jsonStr2}\n\n`);
               }
             }
           }
@@ -212,13 +235,13 @@ app.get('/ask', async (req, res) => {
 
         newRun.data.on('end', finish);
       } catch (err) {
-        console.error('🔥 Ошибка обработки:', err.message);
+        console.error('Ошибка после function_call:', err.message);
         finish();
       }
     });
   } catch (err) {
     console.error('🔥 Ошибка в /ask:', err.message);
-    res.write(`data: {"error": "${err.message}"}\n\n`);
+    res.write(`data: {"error":"${err.message}"}\n\n`);
     finish();
   }
 });
