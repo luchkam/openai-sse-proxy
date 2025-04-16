@@ -171,11 +171,12 @@ app.get('/ask', async (req, res) => {
         try {
           const data = JSON.parse(jsonStr);
           if (data.function_call) {
-            isFunctionCall = true;
-            functionCallName = data.function_call.name;
-            functionCallBuffer += data.function_call.arguments || '';
-            return;
-          }
+  console.log('👉 RAW function_call chunk:', JSON.stringify(data, null, 2));
+  isFunctionCall = true;
+  functionCallName = data.function_call.name;
+  functionCallBuffer += data.function_call.arguments || '';
+  return;
+}
 
           if (!isFunctionCall && data.delta?.content) {
             res.write(`data: ${JSON.stringify(data)}\n\n`);
