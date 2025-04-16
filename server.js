@@ -108,6 +108,7 @@ app.get('/ask', async (req, res) => {
     );
 
     run.data.on('data', async (chunk) => {
+      console.log('Получен фрагмент:', chunk.toString());
       const lines = chunk.toString().split('\n');
       for (const line of lines) {
         if (!line.startsWith('data: ')) continue;
