@@ -4,6 +4,15 @@ const cors = require('cors');
 require('dotenv').config();
 
 const app = express();
+
+// ===== Явные CORS-заголовки =====
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*'); // или строго: 'https://turpoisk.kz'
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  next();
+});
+
 app.use(cors());
 app.use(express.json());
 
@@ -27,7 +36,7 @@ app.get('/new-thread', async (req, res) => {
   }
 });
 
-// === Обработчик функции поиска туров ===
+// === Обработчик вызова функции поиска туров через Tourvisor ===
 async function handleFunctionCall(threadId, funcCall) {
   if (funcCall.name !== 'search_tours') return null;
 
@@ -35,9 +44,13 @@ async function handleFunctionCall(threadId, funcCall) {
     const args = JSON.parse(funcCall.arguments);
     console.log('📩 Аргументы функции:', args);
 
-    const queryParams = new URLSearchParams({
+    const auth = {
       authlogin: 'info@meridiantt.com',
       authpass: 'Mh4GdKPUtwZT',
+    };
+
+    const queryParams = new URLSearchParams({
+      ...auth,
       departure: args.departure,
       country: args.country,
       datefrom: args.datefrom,
@@ -50,35 +63,47 @@ async function handleFunctionCall(threadId, funcCall) {
     });
 
     const searchUrl = `http://tourvisor.ru/xml/search.php?${queryParams.toString()}`;
-    const resultUrl = `http://tourvisor.ru/xml/result.php?authlogin=info@meridiantt.com&authpass=Mh4GdKPUtwZT&type=result&format=json`;
+    const resultBaseUrl = `http://tourvisor.ru/xml/result.php?${new URLSearchParams(auth)}&format=json`;
 
-    // Этап 1: Запуск поиска
+    // Этап 1: запуск поиска
     const searchRes = await axios.get(searchUrl);
     const requestId = searchRes.data?.result?.requestid;
-    console.log('🔍 Request ID:', requestId);
-    if (!requestId) return 'Не удалось запустить поиск туров.';
+    if (!requestId) return '❌ Не удалось запустить поиск туров.';
 
-    // Этап 2: Подождать
-    await new Promise((resolve) => setTimeout(resolve, 5000));
+    console.log('🔍 Request ID:', requestId);
+
+    // Этап 2: ждём завершения поиска через status
+    const statusUrl = `${resultBaseUrl}&requestid=${requestId}&type=status`;
+    const maxAttempts = 4;
+    let status = null;
+
+    for (let i = 0; i < maxAttempts; i++) {
+      await new Promise((r) => setTimeout(r, 2000)); // пауза 2 сек
+
+      const statusRes = await axios.get(statusUrl);
+      status = statusRes.data?.status?.state;
+      console.log(`⌛ Статус [${i + 1}/${maxAttempts}]:`, status);
+
+      if (status === 'finished') break;
+    }
 
     // Этап 3: Получение результатов
-    const resultRes = await axios.get(`${resultUrl}&requestid=${requestId}`);
+    const resultUrl = `${resultBaseUrl}&requestid=${requestId}&type=result`;
+    const resultRes = await axios.get(resultUrl);
     const hotels = resultRes.data?.result?.hotel;
-    console.log('🏨 Найдено отелей:', hotels?.length);
 
-    if (!hotels || hotels.length === 0) return 'По данному запросу туров не найдено.';
+    if (!hotels || hotels.length === 0) return '😞 По данному запросу туров не найдено.';
 
-    // Подготовка ответа
     const reply = hotels.slice(0, 3).map((hotel) => {
       const tour = hotel.tours?.[0];
       if (!tour) return null;
       return `🏨 ${hotel.hotelname} (${hotel.hotelstars}★, ${hotel.regionname}) — от ${tour.price} руб. (${tour.nights} ночей, питание: ${tour.mealrussian})`;
     }).filter(Boolean).join('\n\n');
 
-    return reply || 'Поиск завершен, но туров не найдено.';
+    return reply || '🔎 Поиск завершён, но туров не найдено.';
   } catch (err) {
     console.error('❌ Ошибка в search_tours:', err.message);
-    return 'Произошла ошибка при поиске туров.';
+    return '🚫 Произошла ошибка при поиске туров.';
   }
 }
 
@@ -180,7 +205,7 @@ app.get('/ask', async (req, res) => {
             });
 
             newRun.data.on('end', finish);
-            return; // прерываем внешний run.data
+            return;
           } else {
             res.write(`data: ${jsonStr}\n\n`);
           }
