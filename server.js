@@ -1,4 +1,4 @@
-// server.js
+// Новый server.js с логированием аргументов и явным завершением потока
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
@@ -39,7 +39,7 @@ async function handleFunctionCall(threadId, funcCall) {
 
   try {
     const args = JSON.parse(funcCall.arguments);
-    console.log('📦 Аргументы:', args);
+    console.log('📦 Аргументы:', JSON.stringify(args, null, 2));
 
     const auth = {
       authlogin: 'info@meridiantt.com',
@@ -114,7 +114,6 @@ async function handleFunctionCall(threadId, funcCall) {
 
 app.get('/ask', async (req, res) => {
   const { message, thread_id } = req.query;
-
   if (!thread_id) return res.status(400).json({ error: 'thread_id отсутствует' });
 
   res.setHeader('Content-Type', 'text/event-stream');
@@ -122,15 +121,7 @@ app.get('/ask', async (req, res) => {
   res.setHeader('Connection', 'keep-alive');
 
   const keepAlive = setInterval(() => res.write(':\n\n'), 10000);
-  let finished = false;
-  const finish = () => {
-    if (!finished) {
-      finished = true;
-      clearInterval(keepAlive);
-      res.write('data: [DONE]\n\n');
-      res.end();
-    }
-  };
+  const finish = () => { clearInterval(keepAlive); res.write('data: [DONE]\n\n'); res.end(); };
 
   try {
     const run = await axios.post(
@@ -168,7 +159,6 @@ app.get('/ask', async (req, res) => {
             functionCallBuffer += data.function_call.arguments || '';
             return;
           }
-
           if (!isFunctionCall && data.delta?.content) {
             res.write(`data: ${JSON.stringify(data)}\n\n`);
           }
@@ -186,48 +176,38 @@ app.get('/ask', async (req, res) => {
           name: functionCallName,
           arguments: functionCallBuffer,
         };
+        console.log('📦 Итоговые аргументы:', functionCallBuffer);
 
-        console.log('📦 Аргументы:', functionCallBuffer);
         const resultText = await handleFunctionCall(thread_id, funcCall);
 
-        await axios.post(
-          `https://api.openai.com/v1/threads/${thread_id}/messages`,
-          {
-            role: 'function',
-            name: funcCall.name,
-            content: resultText || 'Ошибка обработки',
+        await axios.post(`https://api.openai.com/v1/threads/${thread_id}/messages`, {
+          role: 'function',
+          name: funcCall.name,
+          content: resultText || 'Ошибка обработки',
+        }, {
+          headers: {
+            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+            'OpenAI-Beta': 'assistants=v2',
           },
-          {
-            headers: {
-              Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-              'OpenAI-Beta': 'assistants=v2',
-            },
-          }
-        );
+        });
 
-        const newRun = await axios.post(
-          `https://api.openai.com/v1/threads/${thread_id}/runs`,
-          {
-            assistant_id: process.env.ASSISTANT_ID,
-            stream: true,
+        const newRun = await axios.post(`https://api.openai.com/v1/threads/${thread_id}/runs`, {
+          assistant_id: process.env.ASSISTANT_ID,
+          stream: true,
+        }, {
+          headers: {
+            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+            'OpenAI-Beta': 'assistants=v2',
           },
-          {
-            headers: {
-              Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-              'OpenAI-Beta': 'assistants=v2',
-            },
-            responseType: 'stream',
-          }
-        );
+          responseType: 'stream',
+        });
 
         newRun.data.on('data', (chunk2) => {
           const lines2 = chunk2.toString().split('\n');
           for (const line2 of lines2) {
             if (line2.startsWith('data: ')) {
               const jsonStr2 = line2.slice(6);
-              if (jsonStr2 !== '[DONE]') {
-                res.write(`data: ${jsonStr2}\n\n`);
-              }
+              if (jsonStr2 !== '[DONE]') res.write(`data: ${jsonStr2}\n\n`);
             }
           }
         });
