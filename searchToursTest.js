@@ -36,7 +36,7 @@ async function searchToursTest(payload) {
 
     process.stdout.write('\n📩 Ответ от Tourvisor (search.php):\n' + JSON.stringify(data, null, 2) + '\n');
 
-    const requestid = data.?.result?.requestid;
+    const requestid = data?.result?.requestid;
     if (!requestid) {
       process.stdout.write('\n❌ RequestID не получен\n');
       throw new Error('Не получен requestid');
