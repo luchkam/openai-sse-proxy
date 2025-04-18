@@ -1,6 +1,6 @@
 const axios = require('axios');
 
-async function searchTours(payload) {
+async function searchToursTest(payload) {
   const { departure, country, datefrom, dateto, nightsfrom, nightsto, adults, child } = payload;
 
   const searchParams = {
@@ -45,4 +45,4 @@ async function searchTours(payload) {
   }
 }
 
-module.exports = { searchTours };
+module.exports = { searchToursTest };
