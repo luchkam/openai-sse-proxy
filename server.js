@@ -154,7 +154,7 @@ async function handleFunctionCall(threadId, funcCall) {
 
   } catch (err) {
     console.error('❌ Ошибка в search_tours:', err.message);
-    return '⚠️ Произошла ошибка при поиске туров. Пожалуйста, попробуйте позже.';
+    return '⚠️ Произошла ошибка при поиска туров. Пожалуйста, попробуйте позже.';
   }
 }
 
@@ -303,23 +303,13 @@ app.get('/ask', async (req, res) => {
   }
 });
 
-// Запуск сервера
-const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => {
-  console.log(`✅ Сервер запущен на порту ${PORT}`);
-});
-
-const express = require('express');
+// Добавляем эндпоинт для тестирования Tourvisor
 const { startSearch, checkStatus, getTopTours, log } = require('./searchToursTest');
-const app = express();
-app.use(express.json());
 
-// Эндпоинт для тестирования через браузер (GET-запрос)
 app.get('/test-search', async (req, res) => {
   try {
-    // Тестовые параметры (можно поменять прямо в URL: /test-search?country=1&datefrom=15.08.2024)
     const params = {
-      country: req.query.country || 1, // 1 = Турция
+      country: req.query.country || 1,
       datefrom: req.query.datefrom || '15.08.2024',
       nights: req.query.nights || 7
     };
@@ -327,7 +317,6 @@ app.get('/test-search', async (req, res) => {
     log(`Тестовый запрос от браузера: ${JSON.stringify(params)}`);
     const requestid = await startSearch(params);
     
-    // Ждем завершения поиска (проверяем статус каждые 3 секунды)
     let status;
     do {
       await new Promise(resolve => setTimeout(resolve, 3000));
@@ -346,9 +335,8 @@ app.get('/test-search', async (req, res) => {
   }
 });
 
-// Запуск сервера
-const PORT = process.env.PORT || 3000;
+// Запуск сервера (один раз!)
+const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-  log(`Сервер запущен на порту ${PORT}`);
-  log(`Тестовая ссылка: https://ваш-проект.onrender.com/test-search`);
+  console.log(`✅ Сервер запущен на порту ${PORT}`);
 });
