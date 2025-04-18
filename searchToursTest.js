@@ -19,8 +19,14 @@ async function searchToursTest(payload) {
 
   try {
     const { data } = await axios.get('https://tourvisor.ru/xml/search.php', { params: searchParams });
-    const requestid = data.requestid;
-    if (!requestid) throw new Error('Не получен requestid');
+
+console.log('🔍 Ответ от search.php:', JSON.stringify(data)); // Добавим лог
+
+const requestid = data.requestid;
+if (!requestid) {
+  console.log('⚠️ RequestID отсутствует. Возможно, проблема в параметрах или авторизации.');
+  throw new Error('Не получен requestid');
+}
 
     for (let i = 0; i < 6; i++) {
       const res = await axios.get('https://tourvisor.ru/xml/result.php', {
