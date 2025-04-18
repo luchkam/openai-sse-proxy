@@ -312,7 +312,7 @@ app.listen(PORT, () => {
 const { searchToursTest } = require('./searchToursTest');
 
 app.get('/test-search', async (req, res) => {
-  const result = await searchToursTest({
+  const payload = {
     departure: 59,
     country: 4,
     datefrom: '20.05.2025',
@@ -321,6 +321,13 @@ app.get('/test-search', async (req, res) => {
     nightsto: 10,
     adults: 2,
     child: 0
-  });
+  };
+
+  console.log('📤 Тестовый payload:', payload);
+
+  const result = await searchToursTest(payload);
+
+  console.log('📥 Результат из searchToursTest:', result);
+
   res.json(result);
 });
