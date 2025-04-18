@@ -53,10 +53,15 @@ async function searchToursTest(payload) {
         }
       });
 
-      const { status, result } = res.data;
-      process.stdout.write(`\n⏱️ Попытка ${i + 1} — статус: ${status?.state}, найдено отелей: ${result?.hotel?.length || 0}\n`);
+      const status = res.data?.status;
+      const result = res.data?.result;
 
-      if (status?.state === 'finished' && result?.hotel?.length > 0) {
+      const state = status?.state;
+      const hotelCount = result?.hotel?.length || 0;
+
+      process.stdout.write(`\n⏱️ Попытка ${i + 1} — статус: ${state}, найдено отелей: ${hotelCount}\n`);
+
+      if (state === 'finished' && hotelCount > 0) {
         return result.hotel.slice(0, 3); // топ-3 отеля
       }
 
