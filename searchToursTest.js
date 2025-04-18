@@ -1,61 +1,74 @@
-// searchToursTest.js
 const axios = require('axios');
 
-async function searchTours(payload) {
-  const { departure, country, datefrom, dateto, nightsfrom, nightsto, adults, child } = payload;
+// Конфигурация Tourvisor (ваши данные)
+const TOURVISOR_AUTH = {
+  authlogin: 'info@meridiantt.com',
+  authpass: 'Mh4GdKPUtwZT',
+  format: 'json'
+};
 
-  const searchParams = {
-    format: 'json',
-    departure,
-    country,
-    datefrom,
-    dateto,
-    nightsfrom,
-    nightsto,
-    adults,
-    child: child || 0,
-    authlogin: 'info@meridiantt.com',
-    authpass: 'Mh4GdKPUtwZT'
-  };
+// Логирование для Render
+function log(message) {
+  const timestamp = new Date().toISOString();
+  process.stdout.write(`[${timestamp}] ${message}\n`);
+}
 
-  console.log('📤 Тестовый payload:', payload);
-  console.log('🔧 Отправляем параметры в Tourvisor:', searchParams);
-
+// Запуск поиска
+async function startSearch(params) {
   try {
-    // Получение requestid
-    const { data: searchResponse } = await axios.get('https://tourvisor.ru/xml/search.php', { params: searchParams });
-    console.log('📩 Ответ от Tourvisor (search.php):', searchResponse);
-
-    const requestid = searchResponse?.result?.requestid;
-    if (!requestid) {
-      console.error('❌ RequestID не получен');
-      return { error: 'Не получен requestid' };
-    }
-
-    for (let i = 1; i <= 6; i++) {
-      await new Promise(r => setTimeout(r, 2000));
-      const resultParams = {
-        requestid,
-        format: 'json',
-        authlogin: searchParams.authlogin,
-        authpass: searchParams.authpass
-      };
-      const { data: resultResponse } = await axios.get('https://tourvisor.ru/xml/result.php', { params: resultParams });
-      const status = resultResponse?.status?.state;
-      const hotels = resultResponse?.result?.hotel || [];
-
-      console.log(`⏱️ Попытка ${i} — статус: ${status}, найдено отелей: ${hotels.length}`);
-
-      if (status === 'finished' && hotels.length > 0) {
-        return hotels.slice(0, 3);
-      }
-    }
-
-    return { error: 'Не удалось получить результат поиска за 12 секунд' };
+    log(`Запуск поиска с параметрами: ${JSON.stringify(params)}`);
+    const response = await axios.get('https://tourvisor.ru/xml/search.php', {
+      params: { ...params, ...TOURVISOR_AUTH }
+    });
+    log(`Поиск запущен, requestid: ${response.data.result.requestid}`);
+    return response.data.result.requestid;
   } catch (error) {
-    console.error('💥 Ошибка в searchToursTest:', error.message);
-    return { error: error.message };
+    log(`Ошибка при запуске поиска: ${error.message}`);
+    throw error;
   }
 }
 
-module.exports = { searchTours };
+// Проверка статуса
+async function checkStatus(requestid) {
+  try {
+    log(`Проверка статуса для requestid: ${requestid}`);
+    const response = await axios.get('https://tourvisor.ru/xml/result.php', {
+      params: { ...TOURVISOR_AUTH, requestid, type: 'status' }
+    });
+    log(`Статус поиска: ${JSON.stringify(response.data.status)}`);
+    return response.data.status;
+  } catch (error) {
+    log(`Ошибка при проверке статуса: ${error.message}`);
+    throw error;
+  }
+}
+
+// Получение топ-3 туров
+async function getTopTours(requestid, limit = 3) {
+  try {
+    log(`Получение результатов для requestid: ${requestid}`);
+    const response = await axios.get('https://tourvisor.ru/xml/result.php', {
+      params: { ...TOURVISOR_AUTH, requestid, type: 'result' }
+    });
+    
+    const allTours = response.data.result.hotel.flatMap(h => 
+      h.tours.tour.map(t => ({
+        hotel: h.hotelname,
+        stars: h.hotelstars,
+        price: t.price,
+        date: t.flydate,
+        nights: t.nights,
+        link: `https://tourvisor.ru/tour/${t.tourid}`
+      }))
+    ).sort((a, b) => a.price - b.price);
+
+    const topTours = allTours.slice(0, limit);
+    log(`Найдено туров: ${allTours.length}, топ-${limit}: ${JSON.stringify(topTours)}`);
+    return topTours;
+  } catch (error) {
+    log(`Ошибка при получении результатов: ${error.message}`);
+    throw error;
+  }
+}
+
+module.exports = { startSearch, checkStatus, getTopTours, log };
