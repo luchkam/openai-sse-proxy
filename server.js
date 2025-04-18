@@ -309,25 +309,46 @@ app.listen(PORT, () => {
   console.log(`✅ Сервер запущен на порту ${PORT}`);
 });
 
-const { searchToursTest } = require('./searchToursTest');
+const express = require('express');
+const { startSearch, checkStatus, getTopTours, log } = require('./searchToursTest');
+const app = express();
+app.use(express.json());
 
+// Эндпоинт для тестирования через браузер (GET-запрос)
 app.get('/test-search', async (req, res) => {
-  const payload = {
-    departure: 59,
-    country: 4,
-    datefrom: '20.05.2025',
-    dateto: '25.05.2025',
-    nightsfrom: 7,
-    nightsto: 10,
-    adults: 2,
-    child: 0
-  };
+  try {
+    // Тестовые параметры (можно поменять прямо в URL: /test-search?country=1&datefrom=15.08.2024)
+    const params = {
+      country: req.query.country || 1, // 1 = Турция
+      datefrom: req.query.datefrom || '15.08.2024',
+      nights: req.query.nights || 7
+    };
 
-  console.log('📤 Тестовый payload:', payload);
+    log(`Тестовый запрос от браузера: ${JSON.stringify(params)}`);
+    const requestid = await startSearch(params);
+    
+    // Ждем завершения поиска (проверяем статус каждые 3 секунды)
+    let status;
+    do {
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      status = await checkStatus(requestid);
+    } while (status.state !== 'finished');
 
-  const result = await searchToursTest(payload);
+    const tours = await getTopTours(requestid);
+    res.json({
+      message: "Топ-3 тура:",
+      tours,
+      fullSearchLink: `https://search.tourvisor.ru/?requestid=${requestid}`
+    });
+  } catch (error) {
+    log(`Ошибка в /test-search: ${error.message}`);
+    res.status(500).json({ error: 'Ошибка поиска' });
+  }
+});
 
-  console.log('📥 Результат из searchToursTest:', result);
-
-  res.json(result);
+// Запуск сервера
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  log(`Сервер запущен на порту ${PORT}`);
+  log(`Тестовая ссылка: https://ваш-проект.onrender.com/test-search`);
 });
