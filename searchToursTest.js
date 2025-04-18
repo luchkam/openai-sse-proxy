@@ -1,74 +1,66 @@
 const axios = require('axios');
 
-// Конфигурация Tourvisor (ваши данные)
-const TOURVISOR_AUTH = {
-  authlogin: 'info@meridiantt.com',
-  authpass: 'Mh4GdKPUtwZT',
-  format: 'json'
-};
+async function searchTours(payload) {
+  const { departure, country, datefrom, dateto, nightsfrom, nightsto, adults, child } = payload;
 
-// Логирование для Render
-function log(message) {
-  const timestamp = new Date().toISOString();
-  process.stdout.write(`[${timestamp}] ${message}\n`);
-}
+  const searchParams = {
+    format: 'json',
+    departure,
+    country,
+    datefrom,
+    dateto,
+    nightsfrom,
+    nightsto,
+    adults,
+    child: child || 0,
+    authlogin: 'info@meridiantt.com',
+    authpass: 'Mh4GdKPUtwZT'
+  };
 
-// Запуск поиска
-async function startSearch(params) {
+  // Логируем параметры
+  process.stdout.write('📤 Тестовый payload: ' + JSON.stringify(payload, null, 2) + '\n');
+  process.stdout.write('🔧 Отправляем параметры в Tourvisor:\n' + JSON.stringify(searchParams, null, 2) + '\n');
+
   try {
-    log(`Запуск поиска с параметрами: ${JSON.stringify(params)}`);
-    const response = await axios.get('https://tourvisor.ru/xml/search.php', {
-      params: { ...params, ...TOURVISOR_AUTH }
-    });
-    log(`Поиск запущен, requestid: ${response.data.result.requestid}`);
-    return response.data.result.requestid;
+    // 1. Получаем requestid
+    const { data } = await axios.get('https://tourvisor.ru/xml/search.php', { params: searchParams });
+    const requestid = data?.result?.requestid;
+
+    process.stdout.write('📩 Ответ от Tourvisor (search.php):\n' + JSON.stringify(data, null, 2) + '\n');
+
+    if (!requestid) {
+      throw new Error('Не получен requestid');
+    }
+
+    // 2. Ожидаем результат
+    for (let i = 1; i <= 6; i++) {
+      const res = await axios.get('https://tourvisor.ru/xml/result.php', {
+        params: {
+          requestid,
+          format: 'json',
+          authlogin: searchParams.authlogin,
+          authpass: searchParams.authpass
+        }
+      });
+
+      const hotels = res.data?.result?.hotel || [];
+      const status = res.data?.status?.state;
+
+      process.stdout.write(`⏱️ Попытка ${i} — статус: ${status}, найдено отелей: ${hotels.length}\n`);
+
+      if (status === 'finished' && hotels.length > 0) {
+        process.stdout.write('✅ Успешно получены туры\n');
+        return hotels.slice(0, 3); // топ-3 отеля
+      }
+
+      await new Promise(r => setTimeout(r, 2000));
+    }
+
+    return { error: 'Не удалось получить результат поиска за 12 секунд' };
   } catch (error) {
-    log(`Ошибка при запуске поиска: ${error.message}`);
-    throw error;
+    process.stdout.write('💥 Ошибка в searchToursTest:\n' + error.message + '\n');
+    return { error: error.message };
   }
 }
 
-// Проверка статуса
-async function checkStatus(requestid) {
-  try {
-    log(`Проверка статуса для requestid: ${requestid}`);
-    const response = await axios.get('https://tourvisor.ru/xml/result.php', {
-      params: { ...TOURVISOR_AUTH, requestid, type: 'status' }
-    });
-    log(`Статус поиска: ${JSON.stringify(response.data.status)}`);
-    return response.data.status;
-  } catch (error) {
-    log(`Ошибка при проверке статуса: ${error.message}`);
-    throw error;
-  }
-}
-
-// Получение топ-3 туров
-async function getTopTours(requestid, limit = 3) {
-  try {
-    log(`Получение результатов для requestid: ${requestid}`);
-    const response = await axios.get('https://tourvisor.ru/xml/result.php', {
-      params: { ...TOURVISOR_AUTH, requestid, type: 'result' }
-    });
-    
-    const allTours = response.data.result.hotel.flatMap(h => 
-      h.tours.tour.map(t => ({
-        hotel: h.hotelname,
-        stars: h.hotelstars,
-        price: t.price,
-        date: t.flydate,
-        nights: t.nights,
-        link: `https://tourvisor.ru/tour/${t.tourid}`
-      }))
-    ).sort((a, b) => a.price - b.price);
-
-    const topTours = allTours.slice(0, limit);
-    log(`Найдено туров: ${allTours.length}, топ-${limit}: ${JSON.stringify(topTours)}`);
-    return topTours;
-  } catch (error) {
-    log(`Ошибка при получении результатов: ${error.message}`);
-    throw error;
-  }
-}
-
-module.exports = { startSearch, checkStatus, getTopTours, log };
+module.exports = { searchTours };
