@@ -26,7 +26,7 @@ async function searchToursTest(payload) {
     authpass: 'Mh4GdKPUtwZT'
   };
 
-  console.log('🔧 Параметры отправки в Tourvisor:', searchParams);
+  process.stdout.write('\n🔧 Отправляем параметры в Tourvisor:\n' + JSON.stringify(searchParams, null, 2) + '\n');
 
   try {
     // 1. Получаем requestid
@@ -34,11 +34,11 @@ async function searchToursTest(payload) {
       params: searchParams
     });
 
-    console.log('📩 Ответ от Tourvisor (search.php):', JSON.stringify(data));
+    process.stdout.write('\n📩 Ответ от Tourvisor (search.php):\n' + JSON.stringify(data, null, 2) + '\n');
 
     const requestid = data.requestid;
     if (!requestid) {
-      console.log('❌ RequestID отсутствует');
+      process.stdout.write('\n❌ RequestID не получен\n');
       throw new Error('Не получен requestid');
     }
 
@@ -53,21 +53,19 @@ async function searchToursTest(payload) {
         }
       });
 
-      if (
-        res.data.status?.state === 'finished' &&
-        res.data.result?.hotel?.length > 0
-      ) {
-        console.log('✅ Получено туров:', res.data.result.hotel.length);
-        return res.data.result.hotel.slice(0, 3); // топ-3 отеля
+      const { status, result } = res.data;
+      process.stdout.write(`\n⏱️ Попытка ${i + 1} — статус: ${status?.state}, найдено отелей: ${result?.hotel?.length || 0}\n`);
+
+      if (status?.state === 'finished' && result?.hotel?.length > 0) {
+        return result.hotel.slice(0, 3); // топ-3 отеля
       }
 
-      console.log(`⏳ Попытка ${i + 1}: поиск не завершён...`);
       await new Promise((r) => setTimeout(r, 2000)); // Ждём 2 сек
     }
 
     return { error: 'Не удалось получить результат поиска за 12 секунд' };
   } catch (error) {
-    console.log('💥 Ошибка во время поиска:', error.message);
+    process.stdout.write('\n💥 Ошибка в searchToursTest:\n' + error.message + '\n');
     return { error: error.message };
   }
 }
