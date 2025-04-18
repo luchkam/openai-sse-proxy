@@ -309,10 +309,10 @@ app.listen(PORT, () => {
   console.log(`✅ Сервер запущен на порту ${PORT}`);
 });
 
-const { searchTours } = require('./searchToursTest');
+const { searchToursTest } = require('./searchToursTest');
 
 app.get('/test-search', async (req, res) => {
-  const result = await searchTours({
+  const result = await searchToursTest({
     departure: 59,
     country: 4,
     datefrom: '20.05.2025',
