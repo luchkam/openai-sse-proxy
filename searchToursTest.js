@@ -1,16 +1,8 @@
+// searchToursTest.js
 const axios = require('axios');
 
-async function searchToursTest(payload) {
-  const {
-    departure,
-    country,
-    datefrom,
-    dateto,
-    nightsfrom,
-    nightsto,
-    adults,
-    child
-  } = payload;
+async function searchTours(payload) {
+  const { departure, country, datefrom, dateto, nightsfrom, nightsto, adults, child } = payload;
 
   const searchParams = {
     format: 'json',
@@ -26,53 +18,44 @@ async function searchToursTest(payload) {
     authpass: 'Mh4GdKPUtwZT'
   };
 
-  process.stdout.write('\n🔧 Отправляем параметры в Tourvisor:\n' + JSON.stringify(searchParams, null, 2) + '\n');
+  console.log('📤 Тестовый payload:', payload);
+  console.log('🔧 Отправляем параметры в Tourvisor:', searchParams);
 
   try {
-    // 1. Получаем requestid
-    const { data } = await axios.get('https://tourvisor.ru/xml/search.php', {
-      params: searchParams
-    });
+    // Получение requestid
+    const { data: searchResponse } = await axios.get('https://tourvisor.ru/xml/search.php', { params: searchParams });
+    console.log('📩 Ответ от Tourvisor (search.php):', searchResponse);
 
-    process.stdout.write('\n📩 Ответ от Tourvisor (search.php):\n' + JSON.stringify(data, null, 2) + '\n');
-
-    const requestid = data?.result?.requestid;
+    const requestid = searchResponse?.result?.requestid;
     if (!requestid) {
-      process.stdout.write('\n❌ RequestID не получен\n');
-      throw new Error('Не получен requestid');
+      console.error('❌ RequestID не получен');
+      return { error: 'Не получен requestid' };
     }
 
-    // 2. Ждём завершения поиска
-    for (let i = 0; i < 6; i++) {
-      const res = await axios.get('https://tourvisor.ru/xml/result.php', {
-        params: {
-          requestid,
-          format: 'json',
-          authlogin: searchParams.authlogin,
-          authpass: searchParams.authpass
-        }
-      });
+    for (let i = 1; i <= 6; i++) {
+      await new Promise(r => setTimeout(r, 2000));
+      const resultParams = {
+        requestid,
+        format: 'json',
+        authlogin: searchParams.authlogin,
+        authpass: searchParams.authpass
+      };
+      const { data: resultResponse } = await axios.get('https://tourvisor.ru/xml/result.php', { params: resultParams });
+      const status = resultResponse?.status?.state;
+      const hotels = resultResponse?.result?.hotel || [];
 
-      const status = res.data?.status;
-      const result = res.data?.result;
+      console.log(`⏱️ Попытка ${i} — статус: ${status}, найдено отелей: ${hotels.length}`);
 
-      const state = status?.state;
-      const hotelCount = result?.hotel?.length || 0;
-
-      process.stdout.write(`\n⏱️ Попытка ${i + 1} — статус: ${state}, найдено отелей: ${hotelCount}\n`);
-
-      if (state === 'finished' && hotelCount > 0) {
-        return result.hotel.slice(0, 3); // топ-3 отеля
+      if (status === 'finished' && hotels.length > 0) {
+        return hotels.slice(0, 3);
       }
-
-      await new Promise((r) => setTimeout(r, 2000)); // Ждём 2 сек
     }
 
     return { error: 'Не удалось получить результат поиска за 12 секунд' };
   } catch (error) {
-    process.stdout.write('\n💥 Ошибка в searchToursTest:\n' + error.message + '\n');
+    console.error('💥 Ошибка в searchToursTest:', error.message);
     return { error: error.message };
   }
 }
 
-module.exports = { searchToursTest };
+module.exports = { searchTours };
