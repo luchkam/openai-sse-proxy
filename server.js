@@ -4,7 +4,7 @@ const axios = require('axios');
 const cors = require('cors');
 require('dotenv').config();
 
-const { searchTours } = require('./searchToursTest');
+const searchTours = require('./searchToursTest');
 const app = express();
 
 // CORS
