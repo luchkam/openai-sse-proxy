@@ -7,7 +7,13 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Новый endpoint для создания потока
+// Параметры авторизации для Tourvisor и OpenAI
+const TOURVISOR_LOGIN = process.env.TOURVISOR_LOGIN;
+const TOURVISOR_PASS = process.env.TOURVISOR_PASS;
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const ASSISTANT_ID = process.env.ASSISTANT_ID;
+
+// Новый endpoint для создания потока (OpenAI)
 app.get('/new-thread', async (req, res) => {
   try {
     const response = await axios.post(
@@ -15,7 +21,7 @@ app.get('/new-thread', async (req, res) => {
       {},
       {
         headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
           'OpenAI-Beta': 'assistants=v2',
         },
       }
@@ -26,7 +32,7 @@ app.get('/new-thread', async (req, res) => {
   }
 });
 
-// SSE endpoint для генерации и потоковой передачи ответа
+// SSE endpoint для генерации и потоковой передачи ответа (OpenAI)
 app.get('/ask', async (req, res) => {
   const userMessage = req.query.message;
   const threadId = req.query.thread_id;
@@ -44,7 +50,7 @@ app.get('/ask', async (req, res) => {
     const run = await axios.post(
       `https://api.openai.com/v1/threads/${threadId}/runs`,
       {
-        assistant_id: process.env.ASSISTANT_ID,
+        assistant_id: ASSISTANT_ID,
         stream: true,
         additional_messages: [
           {
@@ -55,7 +61,7 @@ app.get('/ask', async (req, res) => {
       },
       {
         headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
           'OpenAI-Beta': 'assistants=v2',
         },
         responseType: 'stream',
@@ -83,6 +89,72 @@ app.get('/ask', async (req, res) => {
     console.error('Ошибка в /ask:', error.message);
     res.write(`data: {"error":"${error.message}"}\n\n`);
     res.end();
+  }
+});
+
+// Новый endpoint для поиска туров через Tourvisor
+app.post('/search-tours', async (req, res) => {
+  const { country, city, datefrom, dateto, adults, child } = req.body;
+
+  // Формируем URL для запроса к Tourvisor API
+  const searchUrl = `http://tourvisor.ru/xml/search.php?authlogin=${TOURVISOR_LOGIN}&authpass=${TOURVISOR_PASS}&departure=${city}&country=${country}&datefrom=${datefrom}&dateto=${dateto}&nightsfrom=7&nightsto=10&adults=${adults}&child=${child}&format=json`;
+
+  try {
+    const response = await axios.get(searchUrl);
+    const data = response.data;
+
+    // Возвращаем requestid для дальнейшего отслеживания
+    res.json({ requestid: data.requestid });
+  } catch (error) {
+    console.error("Ошибка при поиске туров:", error.message);
+    res.status(500).json({ error: "Не удалось выполнить запрос на поиск туров" });
+  }
+});
+
+// Эндпоинт для отслеживания статуса поиска туров через Tourvisor
+app.get('/check-status', async (req, res) => {
+  const { requestid } = req.query;
+
+  const statusUrl = `http://tourvisor.ru/xml/result.php?authlogin=${TOURVISOR_LOGIN}&authpass=${TOURVISOR_PASS}&requestid=${requestid}&type=status`;
+
+  try {
+    const response = await axios.get(statusUrl);
+    const data = response.data;
+
+    if (data.status.state === 'finished') {
+      res.json({ status: 'finished', hotelsfound: data.status.hotelsfound });
+    } else {
+      res.json({ status: 'searching', progress: data.status.progress });
+    }
+  } catch (error) {
+    console.error("Ошибка при получении статуса поиска:", error.message);
+    res.status(500).json({ error: "Не удалось получить статус поиска" });
+  }
+});
+
+// Эндпоинт для получения результатов поиска туров через Tourvisor
+app.get('/get-results', async (req, res) => {
+  const { requestid } = req.query;
+
+  const resultsUrl = `http://tourvisor.ru/xml/result.php?authlogin=${TOURVISOR_LOGIN}&authpass=${TOURVISOR_PASS}&requestid=${requestid}&type=result`;
+
+  try {
+    const response = await axios.get(resultsUrl);
+    const data = response.data;
+
+    // Преобразуем результаты в удобный формат для чата
+    const tours = data.result.hotel.map(hotel => ({
+      name: hotel.hotelname,
+      price: hotel.price,
+      country: hotel.countryname,
+      rating: hotel.hotelrating,
+      link: hotel.fulldesclink,
+    }));
+
+    res.json({ tours });
+  } catch (error) {
+    console.error("Ошибка при получении результатов поиска:", error.message);
+    res.status(500).json({ error: "Не удалось получить результаты поиска" });
   }
 });
 
