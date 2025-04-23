@@ -1,21 +1,40 @@
 // === searchToursTest.js ===
-
 const axios = require('axios');
 require('dotenv').config();
 
-const TOURVISOR_AUTH = {
-  authlogin: process.env.TOURVISOR_LOGIN || 'info@meridiantt.com',
-  authpass: process.env.TOURVISOR_PASS || 'Mh4GdKPUtwZT'
+const TOURVISOR_CONFIG = {
+  auth: {
+    authlogin: process.env.TOURVISOR_LOGIN || 'info@meridiantt.com',
+    authpass: process.env.TOURVISOR_PASS || 'Mh4GdKPUtwZT'
+  },
+  timeout: 12000, // увеличим на 12 секунд
+  retries: 6      // до 6 попыток
 };
 
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+async function fetchTourvisorData(url, attempt = 1) {
+  try {
+    const response = await axios.get(url, {
+      timeout: TOURVISOR_CONFIG.timeout,
+      responseType: 'json'
+    });
+
+    if (!response.data) throw new Error('Пустой ответ от Tourvisor');
+    return response.data;
+  } catch (err) {
+    if (attempt >= TOURVISOR_CONFIG.retries) throw err;
+    await new Promise(r => setTimeout(r, 2000 * attempt));
+    return fetchTourvisorData(url, attempt + 1);
+  }
 }
 
 async function searchTours(params) {
-  const formatDate = (str) => str.split('-').reverse().join('.');
+  const formatDate = (dateStr) => {
+    const [year, month, day] = dateStr.split('-');
+    return `${day}.${month}.${year}`;
+  };
+
   const searchUrl = `http://tourvisor.ru/xml/search.php?${new URLSearchParams({
-    ...TOURVISOR_AUTH,
+    ...TOURVISOR_CONFIG.auth,
     departure: params.departure,
     country: params.country,
     datefrom: formatDate(params.datefrom),
@@ -27,54 +46,36 @@ async function searchTours(params) {
     format: 'json'
   })}`;
 
-  try {
-    const start = Date.now();
-    const searchRes = await axios.get(searchUrl);
-    const requestid = searchRes.data?.result?.requestid;
-    if (!requestid) throw new Error('RequestID не получен');
-    process.stdout.write(`📩 Получен requestid: ${requestid}\n`);
+  const searchData = await fetchTourvisorData(searchUrl);
+  const requestId = searchData?.result?.requestid;
+  if (!requestId) throw new Error('Не удалось получить requestid');
+  process.stdout.write(`📨 Получен requestid: ${requestId}\n`);
 
-    const statusUrl = `http://tourvisor.ru/xml/result.php?${new URLSearchParams({
-      ...TOURVISOR_AUTH,
-      requestid,
-      type: 'status',
-      format: 'json'
-    })}`;
+  const resultUrl = `http://tourvisor.ru/xml/result.php?${new URLSearchParams({
+    ...TOURVISOR_CONFIG.auth,
+    requestid: requestId,
+    format: 'json',
+    onpage: 25,
+    type: 'result'
+  })}`;
 
-    let state = 'searching';
-    let timepassed = 0;
-    let attempts = 0;
+  for (let i = 1; i <= TOURVISOR_CONFIG.retries; i++) {
+    const result = await fetchTourvisorData(resultUrl);
+    const state = result?.data?.status?.state;
+    const timepassed = result?.data?.status?.timepassed;
+    const hotels = result?.data?.result?.hotel;
 
-    while (state !== 'finished' && timepassed < 12) {
-      const statusRes = await axios.get(statusUrl);
-      state = statusRes.data?.status?.state;
-      timepassed = Number(statusRes.data?.status?.timepassed);
-      attempts++;
-      process.stdout.write(`⏱️ Попытка ${attempts}: state=${state}, timepassed=${timepassed}s\n`);
-      if (state === 'finished' || timepassed > 7) break;
-      await sleep(2000);
+    process.stdout.write(`⏱️ Попытка ${i}: state=${state}, timepassed=${timepassed}s\n`);
+
+    if (state === 'finished' && Array.isArray(hotels) && hotels.length > 0) {
+      process.stdout.write(`✅ Найдено отелей: ${hotels.length}\n`);
+      return hotels;
     }
 
-    const resultUrl = `http://tourvisor.ru/xml/result.php?${new URLSearchParams({
-      ...TOURVISOR_AUTH,
-      requestid,
-      format: 'json',
-      onpage: 5
-    })}`;
-
-    const resultRes = await axios.get(resultUrl);
-    const result = resultRes.data?.result?.hotel;
-
-    if (!result || result.length === 0) {
-      throw new Error('Нет результатов поиска');
-    }
-
-    process.stdout.write(`✅ Найдено отелей: ${result.length}\n`);
-    return result;
-  } catch (err) {
-    process.stdout.write(`🔥 Ошибка в searchToursTest: ${err.message}\n`);
-    return { error: 'Не удалось получить результат поиска за 12 секунд' };
+    await new Promise(resolve => setTimeout(resolve, 2000));
   }
+
+  throw new Error('Нет результатов поиска');
 }
 
 module.exports = searchTours;
