@@ -26,8 +26,10 @@ app.get('/new-thread', async (req, res) => {
         },
       }
     );
+    process.stdout.write(`\n📩 Получен requestid: ${response.data.id}`);
     res.json({ thread_id: response.data.id });
   } catch (err) {
+    process.stdout.write(`\n❌ Не удалось создать thread_id: ${err.message}`);
     res.status(500).json({ error: 'Не удалось создать thread_id' });
   }
 });
@@ -38,6 +40,7 @@ app.get('/ask', async (req, res) => {
   const threadId = req.query.thread_id;
 
   if (!threadId) {
+    process.stdout.write(`\n❌ thread_id отсутствует`);
     res.status(400).json({ error: 'thread_id отсутствует' });
     return;
   }
@@ -74,6 +77,7 @@ app.get('/ask', async (req, res) => {
         if (line.startsWith('data: ')) {
           const jsonStr = line.slice(6);
           if (jsonStr !== '[DONE]') {
+            process.stdout.write(`\n🔍 Ответ от OpenAI: ${JSON.stringify(jsonStr)}`);
             res.write(`data: ${jsonStr}\n\n`);
           }
         }
@@ -81,12 +85,13 @@ app.get('/ask', async (req, res) => {
     });
 
     run.data.on('end', () => {
+      process.stdout.write(`\n✅ Ответ от OpenAI завершен`);
       res.write('data: [DONE]\n\n');
       res.end();
     });
 
   } catch (error) {
-    console.error('Ошибка в /ask:', error.message);
+    process.stdout.write(`\n❌ Ошибка в /ask: ${error.message}`);
     res.write(`data: {"error":"${error.message}"}\n\n`);
     res.end();
   }
@@ -103,10 +108,11 @@ app.post('/search-tours', async (req, res) => {
     const response = await axios.get(searchUrl);
     const data = response.data;
 
-    // Возвращаем requestid для дальнейшего отслеживания
+    // Логируем полученный requestid
+    process.stdout.write(`\n📩 Получен requestid от TourVisor: ${data.requestid}`);
     res.json({ requestid: data.requestid });
   } catch (error) {
-    console.error("Ошибка при поиске туров:", error.message);
+    process.stdout.write(`\n❌ Ошибка при поиске туров через TourVisor: ${error.message}`);
     res.status(500).json({ error: "Не удалось выполнить запрос на поиск туров" });
   }
 });
@@ -121,13 +127,14 @@ app.get('/check-status', async (req, res) => {
     const response = await axios.get(statusUrl);
     const data = response.data;
 
+    process.stdout.write(`\n🔍 Ответ от TourVisor (status): ${JSON.stringify(data.status)}`);
     if (data.status.state === 'finished') {
       res.json({ status: 'finished', hotelsfound: data.status.hotelsfound });
     } else {
       res.json({ status: 'searching', progress: data.status.progress });
     }
   } catch (error) {
-    console.error("Ошибка при получении статуса поиска:", error.message);
+    process.stdout.write(`\n❌ Ошибка при получении статуса поиска от TourVisor: ${error.message}`);
     res.status(500).json({ error: "Не удалось получить статус поиска" });
   }
 });
@@ -142,7 +149,8 @@ app.get('/get-results', async (req, res) => {
     const response = await axios.get(resultsUrl);
     const data = response.data;
 
-    // Преобразуем результаты в удобный формат для чата
+    process.stdout.write(`\n📦 Ответ по результату поиска: ${JSON.stringify(data)}`);
+
     const tours = data.result.hotel.map(hotel => ({
       name: hotel.hotelname,
       price: hotel.price,
@@ -153,7 +161,7 @@ app.get('/get-results', async (req, res) => {
 
     res.json({ tours });
   } catch (error) {
-    console.error("Ошибка при получении результатов поиска:", error.message);
+    process.stdout.write(`\n❌ Ошибка при получении результатов поиска от TourVisor: ${error.message}`);
     res.status(500).json({ error: "Не удалось получить результаты поиска" });
   }
 });
