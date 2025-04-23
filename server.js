@@ -3,15 +3,15 @@ const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
 require('dotenv').config();
-const { searchTours } = require('./searchToursTest');
 
+const { searchTours } = require('./searchToursTest');
 const app = express();
 
 // CORS
 app.use(cors({ origin: '*', methods: ['GET', 'POST'], allowedHeaders: ['Content-Type'] }));
 app.use(express.json());
 
-// 🔹 Новый тестовый эндпоинт для изоляции searchTours
+// Новый тестовый эндпоинт для изоляции searchTours
 app.get('/test-search', async (req, res) => {
   const testPayload = {
     departure: 59,
@@ -37,5 +37,5 @@ app.get('/test-search', async (req, res) => {
 // Порт по умолчанию (Render сам определяет его через process.env.PORT)
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-  process.stdout.write(`\n✅ Сервер запущен на порту ${PORT}\n`);
+  process.stdout.write('\n✅ Сервер запущен на порту ' + PORT + '\n');
 });
