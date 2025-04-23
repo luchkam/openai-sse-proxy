@@ -1,4 +1,5 @@
-// === searchToursTest.js ===
+// searchToursTest.js
+
 const axios = require('axios');
 
 async function searchTours(payload) {
@@ -23,15 +24,17 @@ async function searchTours(payload) {
     process.stdout.write('🔧 Отправляем параметры в Tourvisor:\n' + JSON.stringify(searchParams, null, 2) + '\n');
 
     // 1. Получаем requestid
-    const { data: searchRes } = await axios.get('https://tourvisor.ru/xml/search.php', { params: searchParams });
-    process.stdout.write('📩 Ответ от Tourvisor (search.php):\n' + JSON.stringify(searchRes, null, 2) + '\n');
+    const { data: searchData } = await axios.get('https://tourvisor.ru/xml/search.php', { params: searchParams });
+    process.stdout.write('📩 Ответ от Tourvisor (search.php):\n' + JSON.stringify(searchData, null, 2) + '\n');
 
-    const requestid = searchRes?.result?.requestid;
+    const requestid = searchData?.result?.requestid;
     if (!requestid) throw new Error('Не получен requestid');
 
     // 2. Ожидаем результат
     for (let i = 1; i <= 6; i++) {
-      const res = await axios.get('https://tourvisor.ru/xml/result.php', {
+      await new Promise(r => setTimeout(r, 2000));
+
+      const { data: resultData } = await axios.get('https://tourvisor.ru/xml/result.php', {
         params: {
           requestid,
           format: 'json',
@@ -40,16 +43,14 @@ async function searchTours(payload) {
         }
       });
 
-      const state = res.data?.status?.state;
-      const hotels = res.data?.result?.hotel || [];
+      const status = resultData?.status?.state;
+      const hotelCount = resultData?.result?.hotel?.length || 0;
 
-      process.stdout.write(`⏱️ Попытка ${i} — статус: ${state}, найдено отелей: ${hotels.length}\n`);
+      process.stdout.write(`⏱️ Попытка ${i} — статус: ${status}, найдено отелей: ${hotelCount}\n`);
 
-      if (state === 'finished' && hotels.length > 0) {
-        return hotels.slice(0, 3); // топ-3 отеля
+      if (status === 'finished' && hotelCount > 0) {
+        return resultData.result.hotel.slice(0, 3); // топ-3 отеля
       }
-
-      await new Promise(r => setTimeout(r, 2000));
     }
 
     return { error: 'Не удалось получить результат поиска за 12 секунд' };
