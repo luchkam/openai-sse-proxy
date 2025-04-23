@@ -86,7 +86,8 @@ async function searchTours(params) {
 
   const finalUrl = `http://tourvisor.ru/xml/result.php?${finalResultParams}`;
   const finalData = await fetchTourvisorData(finalUrl);
-  const result = finalData?.result?.hotel;
+  process.stdout.write(`\n📦 Ответ по результату поиска: ${JSON.stringify(finalData)}\n`);
+  const result = finalData?.data?.result?.hotel;
 
   if (!result || result.length === 0) {
     throw new Error('Нет результатов поиска');
