@@ -98,12 +98,9 @@ app.get('/ask', async (req, res) => {
 });
 
 // Новый endpoint для поиска туров через Tourvisor
-app.get('/search-tours', async (req, res) => {
+app.post('/search-tours', async (req, res) => {
   const { country, city, datefrom, dateto, adults, child } = req.body;
 
-   // ВАЖНО: лог, который покажет — вызывается ли функция и что в ней передано
-  process.stdout.write(`\n📥 Получен запрос от Assistant: ${JSON.stringify(req.query)}`);
-  
   // Формируем URL для запроса к Tourvisor API
   const searchUrl = `http://tourvisor.ru/xml/search.php?authlogin=${TOURVISOR_LOGIN}&authpass=${TOURVISOR_PASS}&departure=${city}&country=${country}&datefrom=${datefrom}&dateto=${dateto}&nightsfrom=7&nightsto=10&adults=${adults}&child=${child}&format=json`;
 
