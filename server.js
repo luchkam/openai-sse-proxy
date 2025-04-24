@@ -31,6 +31,8 @@ app.get('/ask', async (req, res) => {
   const userMessage = req.query.message;
   const threadId = req.query.thread_id;
 
+  process.stdout.write(`➡️ Сообщение от пользователя: ${userMessage}\n`);
+
   if (!threadId) {
     res.status(400).json({ error: 'thread_id отсутствует' });
     return;
@@ -88,11 +90,10 @@ app.get('/ask', async (req, res) => {
 
 // Новый endpoint для обработки запроса от Assistant Function
 app.get('/search-tours', (req, res) => {
-  process.stdout.write('\n📩 Получен запрос от Assistant Function\n');
-  process.stdout.write(`Данные: ${JSON.stringify(req.body)}\n`);
+  process.stdout.write('\n📩 Получен GET-запрос от Assistant Function\n');
+  process.stdout.write(`Параметры: ${JSON.stringify(req.query)}\n`);
 
-  // Пока просто возвращаем данные, чтобы убедиться, что все приходит
-  res.json({ status: 'получено', data: req.body });
+  res.json({ status: 'получено', data: req.query });
 });
 
 const PORT = process.env.PORT || 3000;
