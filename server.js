@@ -93,29 +93,55 @@ app.get('/ask', async (req, res) => {
   }
 });
 
-// Новый endpoint для обработки запроса от Assistant Function и запуска поиска в Tourvisor
+// Новый endpoint для обработки запроса от Assistant Function и запроса в Tourvisor
 app.get('/search-tours', async (req, res) => {
   process.stdout.write('\n📩 Получен GET-запрос от Assistant Function');
   process.stdout.write(`\nПараметры: ${JSON.stringify(req.query)}`);
 
-  const { country, city, datefrom, dateto, adults = 2, child = 0 } = req.query;
+  const { thread_id, run_id, country, city, datefrom, dateto, adults, child = 0 } = req.query;
 
-  if (!country || !city || !datefrom || !dateto) {
-    res.status(400).json({ error: 'Не хватает обязательных параметров: country, city, datefrom, dateto' });
-    return;
+  // Проверка необходимых параметров
+  if (!thread_id || !run_id) {
+    process.stdout.write(`\n❌ Отсутствует thread_id или run_id`);
+    return res.status(400).json({ error: 'thread_id и run_id обязательны' });
   }
 
-  const searchUrl = `http://tourvisor.ru/xml/search.php?authlogin=${process.env.TOURVISOR_LOGIN}&authpass=${process.env.TOURVISOR_PASS}&country=${country}&departure=${city}&datefrom=${datefrom}&dateto=${dateto}&nightsfrom=7&nightsto=10&adults=${adults}&child=${child}&format=json`;
-
-  process.stdout.write(`\n📤 Отправляем запрос в Tourvisor:\n${searchUrl}`);
-
   try {
-    const response = await axios.get(searchUrl);
-    process.stdout.write(`\n📩 Ответ от Tourvisor (requestid): ${JSON.stringify(response.data)}`);
-    res.json({ status: 'поиск отправлен', requestid: response.data.requestid });
-  } catch (error) {
-    process.stdout.write(`\n❌ Ошибка при запросе в Tourvisor: ${error.message}`);
-    res.status(500).json({ error: 'Ошибка при обращении к Tourvisor API' });
+    const args = {
+      tool_outputs: [
+        {
+          tool_call_id: 'call_ceicrYvQ5Q7pgmJIxjQoidoq', // заглушка — заменим позже на динамическую
+          output: 'Поиск запущен, данные переданы в Tourvisor API',
+        },
+      ],
+    };
+
+    // Отправляем POST запрос в OpenAI чтобы подтвердить вызов функции
+    await axios.post(
+      `https://api.openai.com/v1/threads/${thread_id}/runs/${run_id}/submit_tool_outputs`,
+      args,
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          'OpenAI-Beta': 'assistants=v2',
+        },
+      }
+    );
+    process.stdout.write(`\n✅ Информация отправлена обратно в Assistant`);
+
+    // Формируем запрос в Tourvisor
+    const tourvisorUrl = `http://tourvisor.ru/xml/search.php?authlogin=${process.env.TV_LOGIN}&authpass=${process.env.TV_PASS}` +
+      `&departure=${encodeURIComponent(city)}&country=${encodeURIComponent(country)}&datefrom=${datefrom}` +
+      `&dateto=${dateto}&nightsfrom=7&nightsto=10&adults=${adults}&child=${child}&format=json`;
+
+    const tourvisorResponse = await axios.get(tourvisorUrl);
+    process.stdout.write(`\n🌍 Ответ от Tourvisor: ${JSON.stringify(tourvisorResponse.data)}`);
+
+    res.json({ status: 'Tourvisor запрос отправлен и обработан', data: tourvisorResponse.data });
+
+  } catch (err) {
+    process.stdout.write(`\n❌ Ошибка в /search-tours: ${err.message}`);
+    res.status(500).json({ error: 'Ошибка при обработке запроса /search-tours' });
   }
 });
 
