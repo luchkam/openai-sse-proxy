@@ -1,12 +1,3 @@
-const express = require('express');
-const axios = require('axios');
-const cors = require('cors');
-require('dotenv').config();
-
-const app = express();
-app.use(cors());
-app.use(express.json());
-
 // Новый endpoint для создания потока
 app.get('/new-thread', async (req, res) => {
   try {
@@ -20,8 +11,10 @@ app.get('/new-thread', async (req, res) => {
         },
       }
     );
+    process.stdout.write(`\n📩 Получен requestid: ${response.data.id}`);
     res.json({ thread_id: response.data.id });
   } catch (err) {
+    process.stdout.write(`\n❌ Не удалось создать thread_id: ${err.message}`);
     res.status(500).json({ error: 'Не удалось создать thread_id' });
   }
 });
@@ -31,9 +24,10 @@ app.get('/ask', async (req, res) => {
   const userMessage = req.query.message;
   const threadId = req.query.thread_id;
 
-  process.stdout.write(`➡️ Сообщение от пользователя: ${userMessage}\n`);
+  process.stdout.write(`\n➡️ Сообщение от пользователя: ${userMessage}`);
 
   if (!threadId) {
+    process.stdout.write(`\n❌ thread_id отсутствует`);
     res.status(400).json({ error: 'thread_id отсутствует' });
     return;
   }
@@ -70,6 +64,7 @@ app.get('/ask', async (req, res) => {
         if (line.startsWith('data: ')) {
           const jsonStr = line.slice(6);
           if (jsonStr !== '[DONE]') {
+            process.stdout.write(`\n🔍 Ответ от OpenAI: ${JSON.stringify(jsonStr)}`);
             res.write(`data: ${jsonStr}\n\n`);
           }
         }
@@ -77,12 +72,13 @@ app.get('/ask', async (req, res) => {
     });
 
     run.data.on('end', () => {
+      process.stdout.write(`\n✅ Ответ от OpenAI завершен`);
       res.write('data: [DONE]\n\n');
       res.end();
     });
 
   } catch (error) {
-    console.error('Ошибка в /ask:', error.message);
+    process.stdout.write(`\n❌ Ошибка в /ask: ${error.message}`);
     res.write(`data: {"error":"${error.message}"}\n\n`);
     res.end();
   }
@@ -90,14 +86,10 @@ app.get('/ask', async (req, res) => {
 
 // Новый endpoint для обработки запроса от Assistant Function
 app.get('/search-tours', (req, res) => {
-  process.stdout.write('\n📩 Получен GET-запрос от Assistant Function\n');
-  process.stdout.write(`Параметры: ${JSON.stringify(req.query)}\n`);
+  process.stdout.write('\n📩 Получен GET-запрос от Assistant Function');
+  process.stdout.write(`\nПараметры: ${JSON.stringify(req.query)}`);
 
   res.json({ status: 'получено', data: req.query });
-});
-
-app.get('/search-tours', (req, res) => {
-  res.send('🔥 РАБОТАЕТ');
 });
 
 const PORT = process.env.PORT || 3000;
