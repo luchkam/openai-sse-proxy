@@ -86,6 +86,15 @@ app.get('/ask', async (req, res) => {
   }
 });
 
+// Новый endpoint для обработки запроса от Assistant Function
+app.post('/search-tours', (req, res) => {
+  process.stdout.write('\n📩 Получен запрос от Assistant Function\n');
+  process.stdout.write(`Данные: ${JSON.stringify(req.body)}\n`);
+
+  // Пока просто возвращаем данные, чтобы убедиться, что все приходит
+  res.json({ status: 'получено', data: req.body });
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`✅ SSE Proxy Server listening on port ${PORT}`);
