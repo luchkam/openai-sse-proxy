@@ -98,25 +98,23 @@ app.get('/search-tours', async (req, res) => {
   process.stdout.write('\n📩 Получен GET-запрос от Assistant Function');
   process.stdout.write(`\nПараметры: ${JSON.stringify(req.query)}`);
 
-  const { thread_id, run_id, country, city, datefrom, dateto, adults, child = 0 } = req.query;
+  const { thread_id, run_id, tool_call_id, country, city, datefrom, dateto, adults, child = 0 } = req.query;
 
-  // Проверка необходимых параметров
-  if (!thread_id || !run_id) {
-    process.stdout.write(`\n❌ Отсутствует thread_id или run_id`);
-    return res.status(400).json({ error: 'thread_id и run_id обязательны' });
+  if (!thread_id || !run_id || !tool_call_id) {
+    process.stdout.write(`\n❌ Отсутствует thread_id, run_id или tool_call_id`);
+    return res.status(400).json({ error: 'thread_id, run_id и tool_call_id обязательны' });
   }
 
   try {
     const args = {
       tool_outputs: [
         {
-          tool_call_id: 'call_ceicrYvQ5Q7pgmJIxjQoidoq', // заглушка — заменим позже на динамическую
+          tool_call_id: tool_call_id,
           output: 'Поиск запущен, данные переданы в Tourvisor API',
         },
       ],
     };
 
-    // Отправляем POST запрос в OpenAI чтобы подтвердить вызов функции
     await axios.post(
       `https://api.openai.com/v1/threads/${thread_id}/runs/${run_id}/submit_tool_outputs`,
       args,
@@ -129,7 +127,6 @@ app.get('/search-tours', async (req, res) => {
     );
     process.stdout.write(`\n✅ Информация отправлена обратно в Assistant`);
 
-    // Формируем запрос в Tourvisor
     const tourvisorUrl = `http://tourvisor.ru/xml/search.php?authlogin=${process.env.TV_LOGIN}&authpass=${process.env.TV_PASS}` +
       `&departure=${encodeURIComponent(city)}&country=${encodeURIComponent(country)}&datefrom=${datefrom}` +
       `&dateto=${dateto}&nightsfrom=7&nightsto=10&adults=${adults}&child=${child}&format=json`;
