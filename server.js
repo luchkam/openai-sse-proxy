@@ -155,6 +155,15 @@ app.get('/search-tours', async (req, res) => {
   }
 });
 
+// 🔧 БЛОК: getToursFromTourvisor — отдельная вспомогательная функция для внутреннего использования
+async function getToursFromTourvisor({ country, city, datefrom, dateto, adults, child = 0 }) {
+  const url = `http://tourvisor.ru/xml/search.php?authlogin=${process.env.TV_LOGIN}&authpass=${process.env.TV_PASS}` +
+    `&departure=${encodeURIComponent(city)}&country=${encodeURIComponent(country)}&datefrom=${datefrom}` +
+    `&dateto=${dateto}&nightsfrom=7&nightsto=10&adults=${adults}&child=${child}&format=json`;
+  const response = await axios.get(url);
+  return response.data;
+}
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`✅ SSE Proxy Server listening on port ${PORT}`);
