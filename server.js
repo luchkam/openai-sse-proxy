@@ -67,43 +67,26 @@ app.get('/ask', async (req, res) => {
       }
     );
 
-    run.data.on('data', async (chunk) => {
-      const lines = chunk.toString().split('\n');
+    let buffer = '';
+
+    run.data.on('data', (chunk) => {
+      buffer += chunk.toString();
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+
       for (const line of lines) {
         if (line.startsWith('data: ')) {
           const jsonStr = line.slice(6);
           if (jsonStr !== '[DONE]') {
-            process.stdout.write(`\n🔍 Ответ от OpenAI: ${JSON.stringify(jsonStr)}`);
-            res.write(`data: ${jsonStr}\n\n`);
-
             try {
-              const jsonObj = JSON.parse(jsonStr);
-              if (jsonObj.required_action?.type === 'submit_tool_outputs') {
-                const toolCall = jsonObj.required_action.submit_tool_outputs.tool_calls[0];
-                const args = JSON.parse(toolCall.function.arguments);
-
-                await axios.post(
-                  `https://api.openai.com/v1/threads/${threadId}/runs/${jsonObj.id}/submit_tool_outputs`,
-                  {
-                    tool_outputs: [
-                      {
-                        tool_call_id: toolCall.id,
-                        output: '✅ Функция принята, сейчас будет выполнен поиск',
-                      },
-                    ],
-                  },
-                  {
-                    headers: {
-                      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-                      'OpenAI-Beta': 'assistants=v2',
-                    },
-                  }
-                );
-
-                process.stdout.write(`\n📤 submit_tool_outputs отправлен успешно`);
+              const parsed = JSON.parse(jsonStr);
+              if (parsed.required_action) {
+                process.stdout.write(`\n⚠️ required_action обнаружено: ${JSON.stringify(parsed.required_action)}`);
               }
+              process.stdout.write(`\n🔍 Ответ от OpenAI: ${JSON.stringify(parsed)}`);
+              res.write(`data: ${JSON.stringify(parsed)}\n\n`);
             } catch (e) {
-              process.stdout.write(`\n⚠️ Ошибка при обработке required_action: ${e.message}`);
+              process.stdout.write(`\n⚠️ Ошибка парсинга JSON: ${e.message}`);
             }
           }
         }
