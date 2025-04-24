@@ -67,7 +67,7 @@ app.get('/ask', async (req, res) => {
       }
     );
 
-    run.data.on('data', (chunk) => {
+    run.data.on('data', async (chunk) => {
       const lines = chunk.toString().split('\n');
       for (const line of lines) {
         if (line.startsWith('data: ')) {
@@ -75,6 +75,36 @@ app.get('/ask', async (req, res) => {
           if (jsonStr !== '[DONE]') {
             process.stdout.write(`\n🔍 Ответ от OpenAI: ${JSON.stringify(jsonStr)}`);
             res.write(`data: ${jsonStr}\n\n`);
+
+            try {
+              const jsonObj = JSON.parse(jsonStr);
+              if (jsonObj.required_action?.type === 'submit_tool_outputs') {
+                const toolCall = jsonObj.required_action.submit_tool_outputs.tool_calls[0];
+                const args = JSON.parse(toolCall.function.arguments);
+
+                await axios.post(
+                  `https://api.openai.com/v1/threads/${threadId}/runs/${jsonObj.id}/submit_tool_outputs`,
+                  {
+                    tool_outputs: [
+                      {
+                        tool_call_id: toolCall.id,
+                        output: '✅ Функция принята, сейчас будет выполнен поиск',
+                      },
+                    ],
+                  },
+                  {
+                    headers: {
+                      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+                      'OpenAI-Beta': 'assistants=v2',
+                    },
+                  }
+                );
+
+                process.stdout.write(`\n📤 submit_tool_outputs отправлен успешно`);
+              }
+            } catch (e) {
+              process.stdout.write(`\n⚠️ Ошибка при обработке required_action: ${e.message}`);
+            }
           }
         }
       }
