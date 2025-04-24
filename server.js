@@ -96,6 +96,10 @@ app.get('/search-tours', (req, res) => {
   res.json({ status: 'получено', data: req.query });
 });
 
+app.get('/search-tours', (req, res) => {
+  res.send('🔥 РАБОТАЕТ');
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`✅ SSE Proxy Server listening on port ${PORT}`);
