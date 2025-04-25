@@ -106,7 +106,7 @@ app.get('/ask', async (req, res) => {
   }
 });
 
-// ✅ ОБНОВЛЕННЫЙ /search-tours С МНОГОШАГОВЫМ ОЖИДАНИЕМ ОТВЕТА ОТ TOURVISOR
+// Новый endpoint для обработки запроса от Assistant Function и запроса в Tourvisor
 app.get('/search-tours', async (req, res) => {
   process.stdout.write('\n📩 Получен GET-запрос от Assistant Function');
   process.stdout.write(`\nПараметры: ${JSON.stringify(req.query)}`);
@@ -119,16 +119,18 @@ app.get('/search-tours', async (req, res) => {
   }
 
   try {
-    const toolOutputs = [
-      {
-        tool_call_id: tool_call_id,
-        output: 'Поиск запущен, ожидаем ответ от Tourvisor API',
-      },
-    ];
+    const args = {
+      tool_outputs: [
+        {
+          tool_call_id: tool_call_id,
+          output: 'Поиск запущен, данные переданы в Tourvisor API',
+        },
+      ],
+    };
 
     await axios.post(
       `https://api.openai.com/v1/threads/${thread_id}/runs/${run_id}/submit_tool_outputs`,
-      { tool_outputs: toolOutputs },
+      args,
       {
         headers: {
           Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
@@ -136,46 +138,31 @@ app.get('/search-tours', async (req, res) => {
         },
       }
     );
-    process.stdout.write(`\n✅ Информация о запуске поиска отправлена обратно в Assistant`);
+    process.stdout.write(`\n✅ Информация отправлена обратно в Assistant`);
 
-    const auth = `authlogin=${process.env.TV_LOGIN}&authpass=${process.env.TV_PASS}`;
-    const searchUrl = `http://tourvisor.ru/xml/search.php?${auth}&departure=${encodeURIComponent(city)}&country=${encodeURIComponent(country)}&datefrom=${datefrom}&dateto=${dateto}&nightsfrom=7&nightsto=10&adults=${adults}&child=${child}&format=json`;
+    const tourvisorUrl = `http://tourvisor.ru/xml/search.php?authlogin=${process.env.TV_LOGIN}&authpass=${process.env.TV_PASS}` +
+      `&departure=${encodeURIComponent(city)}&country=${encodeURIComponent(country)}&datefrom=${datefrom}` +
+      `&dateto=${dateto}&nightsfrom=7&nightsto=10&adults=${adults}&child=${child}&format=json`;
 
-    const searchData = await axios.get(searchUrl);
-    const requestId = searchData.data?.result?.requestid;
-    if (!requestId) throw new Error('❌ Не удалось получить requestid от Tourvisor');
-    process.stdout.write(`\n📩 Получен requestid от Tourvisor: ${requestId}`);
+    const tourvisorResponse = await axios.get(tourvisorUrl);
+    process.stdout.write(`\n🌍 Ответ от Tourvisor: ${JSON.stringify(tourvisorResponse.data)}`);
 
-    const statusUrl = `http://tourvisor.ru/xml/result.php?${auth}&requestid=${requestId}&format=json&type=status&operatorstatus=1`;
-    let statusResponse, attempts = 0;
-    while (attempts < 6) {
-      await new Promise(res => setTimeout(res, 2000));
-      statusResponse = await axios.get(statusUrl);
-      process.stdout.write(`\n🔄 Попытка ${attempts + 1}, статус: ${JSON.stringify(statusResponse.data)}`);
-      if (statusResponse.data?.data?.status?.state === 'finished') break;
-      attempts++;
-    }
-
-    if (statusResponse.data?.data?.status?.state !== 'finished') {
-      throw new Error('❌ Поиск не завершился за отведенное время');
-    }
-
-    const resultUrl = `http://tourvisor.ru/xml/result.php?${auth}&requestid=${requestId}&format=json&type=result&onpage=5`;
-    const resultResponse = await axios.get(resultUrl);
-    const hotels = resultResponse.data?.data?.result?.hotel;
-    process.stdout.write(`\n📦 Ответ от Tourvisor по отелям: ${JSON.stringify(hotels)}`);
-
-    if (!hotels || hotels.length === 0) {
-      throw new Error('❌ Нет отелей в результате');
-    }
-
-    res.json({ status: 'ok', hotels });
+    res.json({ status: 'Tourvisor запрос отправлен и обработан', data: tourvisorResponse.data });
 
   } catch (err) {
     process.stdout.write(`\n❌ Ошибка в /search-tours: ${err.message}`);
     res.status(500).json({ error: 'Ошибка при обработке запроса /search-tours' });
   }
 });
+
+// 🔧 БЛОК: getToursFromTourvisor — отдельная вспомогательная функция для внутреннего использования
+async function getToursFromTourvisor({ country, city, datefrom, dateto, adults, child = 0 }) {
+  const url = `http://tourvisor.ru/xml/search.php?authlogin=${process.env.TV_LOGIN}&authpass=${process.env.TV_PASS}` +
+    `&departure=${encodeURIComponent(city)}&country=${encodeURIComponent(country)}&datefrom=${datefrom}` +
+    `&dateto=${dateto}&nightsfrom=7&nightsto=10&adults=${adults}&child=${child}&format=json`;
+  const response = await axios.get(url);
+  return response.data;
+}
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
