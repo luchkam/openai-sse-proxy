@@ -8,10 +8,17 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Проверка обязательных переменных окружения
+['OPENAI_API_KEY', 'ASSISTANT_ID', 'TOURVISOR_LOGIN', 'TOURVISOR_PASS'].forEach((key) => {
+  if (!process.env[key]) {
+    throw new Error(`❌ Переменная окружения ${key} не установлена`);
+  }
+});
+
 const TOURVISOR_CONFIG = {
   auth: {
-    authlogin: process.env.TOURVISOR_LOGIN || 'info@meridiantt.com',
-    authpass: process.env.TOURVISOR_PASS || 'Mh4GdKPUtwZT'
+    authlogin: process.env.TOURVISOR_LOGIN,
+    authpass: process.env.TOURVISOR_PASS
   },
   timeout: 15000,
   retries: 6
@@ -54,13 +61,13 @@ app.get('/new-thread', async (req, res) => {
   }
 });
 
-// SSE endpoint для общения с OpenAI
+// SSE endpoint для OpenAI
 app.get('/ask', async (req, res) => {
   const { message, thread_id } = req.query;
   process.stdout.write(`\n➡️ Получено сообщение от пользователя: ${message}`);
 
   if (!thread_id) {
-    process.stdout.write(`\n❌ Ошибка: отсутствует thread_id`);
+    process.stdout.write(`\n❌ Ошибка: thread_id отсутствует`);
     res.status(400).json({ error: 'thread_id отсутствует' });
     return;
   }
@@ -68,6 +75,13 @@ app.get('/ask', async (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
+
+  let streamAborted = false;
+
+  req.on('close', () => {
+    streamAborted = true;
+    process.stdout.write(`\n⚡️ Клиент закрыл соединение`);
+  });
 
   try {
     const run = await axios.post(
@@ -87,7 +101,12 @@ app.get('/ask', async (req, res) => {
     );
 
     let buffer = '';
+
     run.data.on('data', chunk => {
+      if (streamAborted) {
+        run.data.destroy();
+        return;
+      }
       buffer += chunk.toString();
       const lines = buffer.split('\n');
       buffer = lines.pop();
@@ -98,10 +117,10 @@ app.get('/ask', async (req, res) => {
           if (jsonStr !== '[DONE]') {
             try {
               const parsed = JSON.parse(jsonStr);
-              process.stdout.write(`\n🔍 Частичный ответ от OpenAI: ${JSON.stringify(parsed)}`);
+              process.stdout.write(`\n🔍 Частичный ответ: ${JSON.stringify(parsed)}`);
               res.write(`data: ${JSON.stringify(parsed)}\n\n`);
             } catch (e) {
-              process.stdout.write(`\n⚠️ Ошибка парсинга ответа OpenAI: ${e.message}`);
+              process.stdout.write(`\n⚠️ Ошибка парсинга: ${e.message}`);
             }
           }
         }
@@ -109,27 +128,45 @@ app.get('/ask', async (req, res) => {
     });
 
     run.data.on('end', () => {
-      process.stdout.write(`\n✅ Потоковый ответ OpenAI завершен`);
-      res.write('data: [DONE]\n\n');
-      res.end();
+      if (!streamAborted) {
+        process.stdout.write(`\n✅ Поток завершен`);
+        res.write('data: [DONE]\n\n');
+        res.end();
+      }
+    });
+
+    run.data.on('error', (error) => {
+      process.stdout.write(`\n❌ Ошибка в потоке: ${error.message}`);
+      if (!streamAborted) {
+        res.write(`data: {"error":"${error.message}"}\n\n`);
+        res.end();
+      }
     });
 
   } catch (error) {
-    process.stdout.write(`\n❌ Ошибка запроса к OpenAI: ${error.message}`);
-    res.write(`data: {"error":"${error.message}"}\n\n`);
-    res.end();
+    process.stdout.write(`\n❌ Ошибка запроса: ${error.message}`);
+    if (!res.headersSent) {
+      res.write(`data: {"error":"${error.message}"}\n\n`);
+      res.end();
+    }
   }
 });
 
-// Новый endpoint для поиска туров через Tourvisor
+// Endpoint поиска туров через Tourvisor
 app.get('/search-tours', async (req, res) => {
-  process.stdout.write(`\n📩 Запрос на поиск тура от Assistant: ${JSON.stringify(req.query)}`);
+  process.stdout.write(`\n📩 Запрос на поиск: ${JSON.stringify(req.query)}`);
   const { country, city, datefrom, dateto, adults, child = 0 } = req.query;
+
+  if (!country || !city || !datefrom || !dateto || !adults) {
+    process.stdout.write(`\n❌ Ошибка: Нехватка данных`);
+    return res.status(400).json({ error: 'Обязательные параметры поиска тура не переданы' });
+  }
 
   try {
     const formatDate = (dateStr) => {
-      const [day, month, year] = dateStr.split('.');
-      return `${day}.${month}.${year}`;
+      const parts = dateStr.split('.');
+      if (parts.length !== 3) throw new Error('Неверный формат даты. Ожидается DD.MM.YYYY');
+      return `${parts[0]}.${parts[1]}.${parts[2]}`;
     };
 
     const searchParams = new URLSearchParams({
@@ -146,13 +183,13 @@ app.get('/search-tours', async (req, res) => {
     });
 
     const searchUrl = `http://tourvisor.ru/xml/search.php?${searchParams}`;
-    process.stdout.write(`\n🌍 Отправляем запрос в Tourvisor: ${searchUrl}`);
+    process.stdout.write(`\n🌍 Запрос Tourvisor: ${searchUrl}`);
 
     const searchData = await fetchTourvisorData(searchUrl);
     const requestId = searchData?.result?.requestid;
 
-    if (!requestId) throw new Error('Не удалось получить requestid от Tourvisor');
-    process.stdout.write(`\n📩 Получен requestid: ${requestId}`);
+    if (!requestId) throw new Error('Не удалось получить requestid');
+    process.stdout.write(`\n📩 requestid: ${requestId}`);
 
     const statusParams = new URLSearchParams({
       ...TOURVISOR_CONFIG.auth,
@@ -170,7 +207,7 @@ app.get('/search-tours', async (req, res) => {
       await delay(2000);
       const result = await fetchTourvisorData(statusUrl);
       status = result?.data?.status;
-      process.stdout.write(`\n🔍 Статус поиска: ${JSON.stringify(status)}`);
+      process.stdout.write(`\n🔍 Статус: ${JSON.stringify(status)}`);
 
       if (status?.state === 'finished') break;
       attempts++;
@@ -187,7 +224,7 @@ app.get('/search-tours', async (req, res) => {
     });
 
     const resultUrl = `http://tourvisor.ru/xml/result.php?${resultParams}`;
-    process.stdout.write(`\n🌍 Получаем результаты поиска: ${resultUrl}`);
+    process.stdout.write(`\n🌍 Результаты поиска: ${resultUrl}`);
 
     const finalData = await fetchTourvisorData(resultUrl);
     const hotels = finalData?.data?.result?.hotel;
