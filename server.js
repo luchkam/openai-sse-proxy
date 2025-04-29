@@ -24,6 +24,9 @@ const TOURVISOR_CONFIG = {
   retries: 6
 };
 
+let citiesList = [];
+let countriesList = [];
+
 async function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -39,6 +42,35 @@ async function fetchTourvisorData(url, attempt = 1) {
     return fetchTourvisorData(url, attempt + 1);
   }
 }
+
+async function loadDictionaries() {
+  try {
+    const citiesUrl = `http://tourvisor.ru/xml/list.php?${new URLSearchParams({
+      ...TOURVISOR_CONFIG.auth,
+      type: 'departure',
+      format: 'json'
+    })}`;
+    const countriesUrl = `http://tourvisor.ru/xml/list.php?${new URLSearchParams({
+      ...TOURVISOR_CONFIG.auth,
+      type: 'country',
+      format: 'json'
+    })}`;
+
+    const citiesData = await fetchTourvisorData(citiesUrl);
+    const countriesData = await fetchTourvisorData(countriesUrl);
+
+    citiesList = citiesData?.departure || [];
+    countriesList = countriesData?.country || [];
+
+    process.stdout.write(`\n✅ Справочники загружены: ${citiesList.length} городов, ${countriesList.length} стран`);
+  } catch (err) {
+    process.stdout.write(`\n❌ Ошибка загрузки справочников: ${err.message}`);
+  }
+}
+
+// Загружаем справочники при старте и обновляем их раз в сутки
+loadDictionaries();
+setInterval(loadDictionaries, 24 * 60 * 60 * 1000);
 
 // Endpoint для создания нового потока OpenAI
 app.get('/new-thread', async (req, res) => {
@@ -163,22 +195,24 @@ app.get('/search-tours', async (req, res) => {
   }
 
   try {
-    const formatDate = (dateStr) => {
-      const parts = dateStr.split('.');
-      if (parts.length !== 3) throw new Error('Неверный формат даты. Ожидается DD.MM.YYYY');
-      return `${parts[0]}.${parts[1]}.${parts[2]}`;
-    };
+    // Поиск кода города и страны в справочниках
+    const cityEntry = citiesList.find(c => c.name.toLowerCase() === city.toLowerCase());
+    const countryEntry = countriesList.find(c => c.name.toLowerCase() === country.toLowerCase());
+
+    if (!cityEntry || !countryEntry) {
+      throw new Error('Не удалось найти код города или страны в справочниках');
+    }
 
     const searchParams = new URLSearchParams({
       ...TOURVISOR_CONFIG.auth,
-      departure: city,
-      country: country,
-      datefrom: formatDate(datefrom),
-      dateto: formatDate(dateto),
+      departure: cityEntry.id,
+      country: countryEntry.id,
+      datefrom,
+      dateto,
       nightsfrom: 7,
       nightsto: 10,
-      adults: adults,
-      child: child,
+      adults,
+      child,
       format: 'json'
     });
 
