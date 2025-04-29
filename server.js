@@ -2,6 +2,7 @@
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
+const fs = require('fs');
 require('dotenv').config();
 
 const app = express();
@@ -24,9 +25,6 @@ const TOURVISOR_CONFIG = {
   retries: 6
 };
 
-let citiesList = [];
-let countriesList = [];
-
 async function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -43,34 +41,17 @@ async function fetchTourvisorData(url, attempt = 1) {
   }
 }
 
-async function loadDictionaries() {
-  try {
-    const citiesUrl = `http://tourvisor.ru/xml/list.php?${new URLSearchParams({
-      ...TOURVISOR_CONFIG.auth,
-      type: 'departure',
-      format: 'json'
-    })}`;
-    const countriesUrl = `http://tourvisor.ru/xml/list.php?${new URLSearchParams({
-      ...TOURVISOR_CONFIG.auth,
-      type: 'country',
-      format: 'json'
-    })}`;
+// Загрузка справочников
+let countriesList = [];
+let citiesList = [];
 
-    const citiesData = await fetchTourvisorData(citiesUrl);
-    const countriesData = await fetchTourvisorData(countriesUrl);
-
-    citiesList = citiesData?.departure || [];
-    countriesList = countriesData?.country || [];
-
-    process.stdout.write(`\n✅ Справочники загружены: ${citiesList.length} городов, ${countriesList.length} стран`);
-  } catch (err) {
-    process.stdout.write(`\n❌ Ошибка загрузки справочников: ${err.message}`);
-  }
+try {
+  countriesList = JSON.parse(fs.readFileSync('./countries.json'));
+  citiesList = JSON.parse(fs.readFileSync('./cities.json'));
+  process.stdout.write(`\n✅ Справочники загружены`);
+} catch (error) {
+  process.stdout.write(`\n⚠️ Ошибка загрузки справочников: ${error.message}`);
 }
-
-// Загружаем справочники при старте и обновляем их раз в сутки
-loadDictionaries();
-setInterval(loadDictionaries, 24 * 60 * 60 * 1000);
 
 // Endpoint для создания нового потока OpenAI
 app.get('/new-thread', async (req, res) => {
@@ -187,32 +168,39 @@ app.get('/ask', async (req, res) => {
 // Endpoint поиска туров через Tourvisor
 app.get('/search-tours', async (req, res) => {
   process.stdout.write(`\n📩 Запрос на поиск: ${JSON.stringify(req.query)}`);
-  const { country, city, datefrom, dateto, adults, child = 0 } = req.query;
+  let { country, city, datefrom, dateto, adults, child = 0 } = req.query;
 
   if (!country || !city || !datefrom || !dateto || !adults) {
     process.stdout.write(`\n❌ Ошибка: Нехватка данных`);
     return res.status(400).json({ error: 'Обязательные параметры поиска тура не переданы' });
   }
 
-  try {
-    // Поиск кода города и страны в справочниках
-    const cityEntry = citiesList.find(c => c.name.toLowerCase() === city.toLowerCase());
-    const countryEntry = countriesList.find(c => c.name.toLowerCase() === country.toLowerCase());
+  // Преобразование текстовых названий в коды через справочники
+  const countryEntry = countriesList.find(c => c.name.toLowerCase() === country.toLowerCase());
+  const cityEntry = citiesList.find(c => c.name.toLowerCase() === city.toLowerCase());
 
-    if (!cityEntry || !countryEntry) {
-      throw new Error('Не удалось найти код города или страны в справочниках');
-    }
+  if (!countryEntry || !cityEntry) {
+    process.stdout.write(`\n❌ Ошибка: Страна или город не найдены в справочниках`);
+    return res.status(400).json({ error: 'Страна или город не найдены в справочниках' });
+  }
+
+  try {
+    const formatDate = (dateStr) => {
+      const parts = dateStr.split('.');
+      if (parts.length !== 3) throw new Error('Неверный формат даты. Ожидается DD.MM.YYYY');
+      return `${parts[0]}.${parts[1]}.${parts[2]}`;
+    };
 
     const searchParams = new URLSearchParams({
       ...TOURVISOR_CONFIG.auth,
       departure: cityEntry.id,
       country: countryEntry.id,
-      datefrom,
-      dateto,
+      datefrom: formatDate(datefrom),
+      dateto: formatDate(dateto),
       nightsfrom: 7,
       nightsto: 10,
-      adults,
-      child,
+      adults: adults,
+      child: child,
       format: 'json'
     });
 
