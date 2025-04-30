@@ -1,0 +1,50 @@
+{
+  "lists": {
+    "meals": {
+      "meal": [
+        {
+          "id": "2",
+          "name": "RO",
+          "fullname": "Room Only",
+          "russian": "Без питания",
+          "russianfull": "Без питания"
+        },
+        {
+          "id": "3",
+          "name": "BB",
+          "fullname": "Bed&Breakfast",
+          "russian": "Завтрак",
+          "russianfull": "BB - Только завтрак"
+        },
+        {
+          "id": "4",
+          "name": "HB",
+          "fullname": "Half Board",
+          "russian": "Завтрак, Ужин",
+          "russianfull": "HB - Завтрак, Ужин"
+        },
+        {
+          "id": "5",
+          "name": "FB",
+          "fullname": "Full Board",
+          "russian": "Завтрак, Обед, Ужин",
+          "russianfull": "FB - Полный Пансион"
+        },
+        {
+          "id": "7",
+          "name": "AI",
+          "fullname": "All Inclusive",
+          "russian": "Все Включено",
+          "russianfull": "AI - Все Включено"
+        },
+        {
+          "id": "9",
+          "name": "UAI",
+          "fullname": "Ultra All Inclusive",
+          "russian": "Ультра Все Вкл",
+          "russianfull": "UAI - Ультра Все Включено"
+        }
+      ]
+    }
+  }
+}
