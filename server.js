@@ -43,11 +43,11 @@ async function fetchTourvisorData(url, attempt = 1) {
 
 // Загрузка справочников
 let countriesList = [];
-let citiesList = [];
+let departureList = [];
 
 try {
   countriesList = JSON.parse(fs.readFileSync('./countries.json'));
-  citiesList = JSON.parse(fs.readFileSync('./cities.json'));
+  departureList = JSON.parse(fs.readFileSync('./departure.json'));
   process.stdout.write(`\n✅ Справочники загружены`);
 } catch (error) {
   process.stdout.write(`\n⚠️ Ошибка загрузки справочников: ${error.message}`);
@@ -168,16 +168,16 @@ app.get('/ask', async (req, res) => {
 // Endpoint поиска туров через Tourvisor
 app.get('/search-tours', async (req, res) => {
   process.stdout.write(`\n📩 Запрос на поиск: ${JSON.stringify(req.query)}`);
-  let { country, city, datefrom, dateto, adults, child = 0 } = req.query;
+  let { country, departure, datefrom, dateto, adults, child = 0 } = req.query;
 
-  if (!country || !city || !datefrom || !dateto || !adults) {
+  if (!country || !departure || !datefrom || !dateto || !adults) {
     process.stdout.write(`\n❌ Ошибка: Нехватка данных`);
     return res.status(400).json({ error: 'Обязательные параметры поиска тура не переданы' });
   }
 
   // Преобразование текстовых названий в коды через справочники
   const countryEntry = countriesList.find(c => c.name.toLowerCase() === country.toLowerCase());
-  const cityEntry = citiesList.find(c => c.name.toLowerCase() === city.toLowerCase());
+  const departureEntry = departureList.find(c => c.name.toLowerCase() === city.toLowerCase());
 
   if (!countryEntry || !cityEntry) {
     process.stdout.write(`\n❌ Ошибка: Страна или город не найдены в справочниках`);
@@ -193,7 +193,7 @@ app.get('/search-tours', async (req, res) => {
 
     const searchParams = new URLSearchParams({
       ...TOURVISOR_CONFIG.auth,
-      departure: cityEntry.id,
+      departure: departureEntry.id,
       country: countryEntry.id,
       datefrom: formatDate(datefrom),
       dateto: formatDate(dateto),
