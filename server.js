@@ -7,95 +7,137 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Новый endpoint для создания потока
-app.get('/new-thread', async (req, res) => {
-  process.stdout.write('Создание нового потока...\n'); // Логируем начало
+// Авторизационные данные для Tourvisor
+const TOURVISOR_LOGIN = 'info@meridiantt.com';
+const TOURVISOR_PASSWORD = 'Mh4GdKPUtwZT';
+
+// Функция для запроса данных из API Tourvisor (справочники)
+const getTourvisorData = async (type, params = {}) => {
+  const url = `http://tourvisor.ru/xml/list.php?format=json&type=${type}&authlogin=${TOURVISOR_LOGIN}&authpass=${TOURVISOR_PASSWORD}`;
+  const response = await axios.get(url, { params });
+  return response.data;
+};
+
+// Функция для поиска туров через API Tourvisor
+const searchTours = async (departure, country, dateFrom, dateTo, nights, adults, children) => {
+  const searchParams = {
+    departure,
+    country,
+    datefrom: dateFrom,
+    dateto: dateTo,
+    nightsfrom: nights,
+    nightsto: nights,
+    adults,
+    child: children.length,
+    childage1: children[0] || null,
+    childage2: children[1] || null,
+    childage3: children[2] || null,
+    format: 'json'
+  };
+
+  const searchUrl = `http://tourvisor.ru/xml/search.php?authlogin=${TOURVISOR_LOGIN}&authpass=${TOURVISOR_PASSWORD}`;
+  
+  try {
+    const searchResponse = await axios.get(searchUrl, { params: searchParams });
+    const requestId = searchResponse.data.requestid;
+
+    // Получаем статус поиска
+    let statusResponse = await axios.get(`http://tourvisor.ru/xml/result.php?authlogin=${TOURVISOR_LOGIN}&authpass=${TOURVISOR_PASSWORD}&requestid=${requestId}&type=status`);
+    while (statusResponse.data.status.state === 'searching') {
+      console.log('Поиск в процессе...');
+      await new Promise(resolve => setTimeout(resolve, 2000)); // Задержка для получения статуса
+      statusResponse = await axios.get(`http://tourvisor.ru/xml/result.php?authlogin=${TOURVISOR_LOGIN}&authpass=${TOURVISOR_PASSWORD}&requestid=${requestId}&type=status`);
+    }
+
+    // Получаем результаты поиска
+    const resultsResponse = await axios.get(`http://tourvisor.ru/xml/result.php?authlogin=${TOURVISOR_LOGIN}&authpass=${TOURVISOR_PASSWORD}&requestid=${requestId}&type=result`);
+
+    // Обрабатываем результаты (сортировка по цене и выбор 3 самых дешевых)
+    const tours = resultsResponse.data.result[0].hotel[0].tours;
+    const sortedTours = tours.sort((a, b) => a.price - b.price).slice(0, 3);
+
+    // Формируем текстовый ответ с 3 самыми дешевыми турами
+    let resultText = 'Вот 3 самых дешевых тура:\n';
+    sortedTours.forEach(tour => {
+      resultText += `- ${tour.hotelname} (${tour.flydate}): ${tour.price} руб.\n`;
+    });
+
+    return resultText;
+  } catch (error) {
+    console.error('Ошибка при поиске тура:', error);
+    throw new Error('Не удалось найти туры.');
+  }
+};
+
+// Функция для общения с Assistant OpenAI API
+const sendToAssistant = async (message, threadId) => {
+  const url = `https://api.openai.com/v1/assistants/${process.env.ASSISTANT_ID}/runs`; // Используем нужный endpoint для взаимодействия с ассистентом
+
   try {
     const response = await axios.post(
-      'https://api.openai.com/v1/threads',
-      {},
+      url,
       {
-        headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-          'OpenAI-Beta': 'assistants=v2',
-        },
-      }
-    );
-    process.stdout.write(`Новый thread_id создан: ${response.data.id}\n`); // Логируем успешный ответ
-    res.json({ thread_id: response.data.id });
-  } catch (err) {
-    process.stdout.write(`Ошибка при создании thread_id: ${err.message}\n`); // Логируем ошибку
-    res.status(500).json({ error: 'Не удалось создать thread_id' });
-  }
-});
-
-// SSE endpoint для генерации и потоковой передачи ответа
-app.get('/ask', async (req, res) => {
-  const userMessage = req.query.message;
-  const threadId = req.query.thread_id;
-
-  if (!threadId) {
-    process.stdout.write('Ошибка: отсутствует thread_id\n'); // Логируем отсутствие thread_id
-    res.status(400).json({ error: 'thread_id отсутствует' });
-    return;
-  }
-
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-
-  process.stdout.write(`Запрос к OpenAI с thread_id: ${threadId}, сообщение: ${userMessage}\n`); // Логируем начало запроса
-
-  try {
-    const run = await axios.post(
-      `https://api.openai.com/v1/threads/${threadId}/runs`,
-      {
-        assistant_id: process.env.ASSISTANT_ID,
-        stream: true,
-        additional_messages: [
-          {
-            role: 'user',
-            content: userMessage,
-          },
+        assistant_id: process.env.ASSISTANT_ID, // Идентификатор ассистента
+        thread_id: threadId, // Используем thread_id для сохранения контекста
+        messages: [
+          { role: "user", content: message }, // Отправляем сообщение пользователя
         ],
+        stream: true, // Включаем потоковый ответ
       },
       {
         headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-          'OpenAI-Beta': 'assistants=v2',
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, // API ключ OpenAI
         },
-        responseType: 'stream',
       }
     );
 
-    run.data.on('data', (chunk) => {
-      const lines = chunk.toString().split('\n');
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const jsonStr = line.slice(6);
-          if (jsonStr !== '[DONE]') {
-            res.write(`data: ${jsonStr}\n\n`);
-            process.stdout.write(`Отправлено: ${jsonStr}\n`); // Логируем отправку данных
-          }
-        }
-      }
-    });
-
-    run.data.on('end', () => {
-      res.write('data: [DONE]\n\n');
-      res.end();
-      process.stdout.write('Поток завершен\n'); // Логируем завершение потока
-    });
-
+    // Обрабатываем ответ от ассистента
+    return response.data;
   } catch (error) {
-    process.stdout.write(`Ошибка в /ask: ${error.message}\n`); // Логируем ошибку
-    console.error('Ошибка в /ask:', error.message);
-    res.write(`data: {"error":"${error.message}"}\n\n`);
-    res.end();
+    console.error("Ошибка при отправке сообщения в Assistant:", error);
+    throw new Error("Не удалось получить ответ от ассистента.");
+  }
+};
+
+// Новый endpoint для поиска туров
+app.get('/search-tours', async (req, res) => {
+  const { departure, country, dateFrom, dateTo, nights, adults, children } = req.query;
+
+  if (!departure || !country || !dateFrom || !dateTo || !nights || !adults) {
+    return res.status(400).json({ error: 'Не все параметры были переданы.' });
+  }
+
+  try {
+    // Получаем текстовый результат поиска туров
+    const resultText = await searchTours(departure, country, dateFrom, dateTo, nights, adults, children.split(','));
+
+    // Отправляем запрос в Assistant с полученным текстом
+    const assistantResponse = await sendToAssistant(resultText, req.session.threadId);
+
+    // Ответ от ассистента
+    res.json({ result: assistantResponse });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Простой endpoint для общения с ассистентом (другие запросы)
+app.get('/ask', async (req, res) => {
+  const { message, threadId } = req.query;
+
+  if (!message || !threadId) {
+    return res.status(400).json({ error: 'Не все параметры были переданы.' });
+  }
+
+  try {
+    const assistantResponse = await sendToAssistant(message, threadId);
+    res.json({ result: assistantResponse });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  process.stdout.write(`✅ SSE Proxy Server listening on port ${PORT}\n`); // Логируем запуск сервера
+  console.log(`Сервер слушает на порту ${PORT}`);
 });
