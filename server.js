@@ -249,7 +249,7 @@ app.get('/search-tours', async (req, res) => {
     });
   }
 
-  if (isNaN(adults) {
+  if (isNaN(adults)) {
     return res.status(400).json({ 
       error: 'Adults must be a number' 
     });
