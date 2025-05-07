@@ -73,14 +73,9 @@ async function fetchTourvisorData(url, attempt = 1) {
 
 // Загрузка справочников с обработкой ошибок
 function loadReferenceData() {
-  const dataDir = path.join(__dirname, 'data');
-  
   try {
-    const countriesPath = path.join(dataDir, 'countries.json');
-    const departurePath = path.join(dataDir, 'departure.json');
-    
-    const countriesData = fs.readFileSync(countriesPath, 'utf8');
-    const departureData = fs.readFileSync(departurePath, 'utf8');
+    const countriesData = fs.readFileSync('./countries.json', 'utf8');
+    const departureData = fs.readFileSync('./departure.json', 'utf8');
     
     return {
       countriesList: JSON.parse(countriesData),
