@@ -96,16 +96,47 @@ app.get('/ask', async (req, res) => {
 });
 
 app.post('/search-tours', async (req, res) => {
-  process.stdout.write('📥 Вызов функции search_tours от ассистента\n');
+  process.stdout.write('📥 Получен вызов функции search_tours от OpenAI Assistant\n');
 
-  const payload = req.body;
-  process.stdout.write(`🔧 Полученные параметры: ${JSON.stringify(payload)}\n`);
+  try {
+    const toolCall = req.body?.tool_calls?.[0];
+    if (!toolCall) {
+      process.stdout.write('❌ Не найден tool_call в теле запроса\n');
+      return res.status(400).json({ error: 'tool_call not found' });
+    }
 
-  // Временно — просто тестовый ответ
-  res.json({
-    message: "Функция search_tours вызвана успешно",
-    received: payload
-  });
+    const args = JSON.parse(toolCall.function.arguments);
+    const {
+      departure, country, datefrom, dateto,
+      nightsfrom, nightsto, adults, child,
+      childage1, childage2
+    } = args;
+
+    process.stdout.write(`🔍 Параметры поиска:\n${JSON.stringify(args, null, 2)}\n`);
+
+    // Пока просто фиктивный ответ
+    const fakeResult = `
+Найдено 3 тура:
+1. Тур в ${country}, отель Example Resort ★★★★ – 320 000 ₸
+2. Тур в ${country}, отель Beach Paradise ★★★ – 290 000 ₸
+3. Тур в ${country}, отель Family Club ★★★★★ – 350 000 ₸
+    `;
+
+    // Возвращаем ответ в OpenAI Assistant
+    res.json({
+      tool_outputs: [
+        {
+          tool_call_id: toolCall.id,
+          output: fakeResult
+        }
+      ]
+    });
+
+    process.stdout.write('✅ Ответ отправлен в ассистент\n');
+  } catch (err) {
+    process.stdout.write(`❌ Ошибка в /search-tours: ${err.message}\n`);
+    res.status(500).json({ error: 'Ошибка на сервере' });
+  }
 });
 
 const PORT = process.env.PORT || 3000;
