@@ -95,6 +95,77 @@ app.get('/ask', async (req, res) => {
   }
 });
 
+app.post('/search-tours', async (req, res) => {
+  const { departureId, countryId, dateFrom, nights, adults, children, stars, mealCode } = req.body;
+
+  // Логируем запрос
+  process.stdout.write(`🔍 Поиск туров: ${JSON.stringify(req.body)}\n`);
+
+  // 1. Запуск поиска через Tourvisor API
+  try {
+    const searchParams = new URLSearchParams({
+      authlogin: process.env.TOURVISOR_LOGIN,
+      authpass: process.env.TOURVISOR_PASS,
+      departure: departureId,
+      country: countryId,
+      datefrom: dateFrom,
+      nightsto: nights,
+      adults: adults,
+      child: children || 0,
+      stars: stars || 0,
+      meal: mealCode || '',
+      currency: 3, // Тенге
+      format: 'json'
+    });
+
+    const searchUrl = `http://tourvisor.ru/xml/search.php?${searchParams}`;
+    process.stdout.write(`🚀 Запрос к Tourvisor: ${searchUrl}\n`);
+
+    const searchResponse = await axios.get(searchUrl);
+    const requestId = searchResponse.data.requestid;
+    process.stdout.write(`🆔 ID запроса Tourvisor: ${requestId}\n`);
+
+    // 2. Ожидаем завершения поиска (проверяем статус каждые 2 секунды)
+    let attempts = 0;
+    let searchData;
+
+    while (attempts < 5) {
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      const statusUrl = `http://tourvisor.ru/xml/result.php?requestid=${requestId}&type=status&format=json`;
+      const statusResponse = await axios.get(statusUrl);
+
+      if (statusResponse.data.status.state === 'finished') {
+        process.stdout.write(`✅ Поиск завершен. Найдено туров: ${statusResponse.data.status.toursfound}\n`);
+        // 3. Получаем результаты
+        const resultUrl = `http://tourvisor.ru/xml/result.php?requestid=${requestId}&type=result&format=json`;
+        searchData = (await axios.get(resultUrl)).data;
+        break;
+      }
+      attempts++;
+    }
+
+    if (!searchData) {
+      throw new Error('Превышено время ожидания ответа от Tourvisor');
+    }
+
+    // 4. Форматируем топ-3 тура для Assistant
+    const topTours = searchData.result.hotel.slice(0, 3).map(hotel => ({
+      hotel: hotel.hotelname,
+      price: hotel.price,
+      nights: hotel.tours[0].nights,
+      date: hotel.tours[0].flydate,
+      meal: hotel.tours[0].mealrussian,
+      operator: hotel.tours[0].operatorname
+    }));
+
+    res.json({ tours: topTours });
+
+  } catch (error) {
+    process.stdout.write(`❌ Ошибка: ${error.message}\n`);
+    res.status(500).json({ error: 'Не удалось найти туры' });
+  }
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   process.stdout.write(`✅ SSE Proxy Server listening on port ${PORT}\n`); // Логируем запуск сервера
