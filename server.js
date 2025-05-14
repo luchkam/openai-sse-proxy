@@ -97,6 +97,7 @@ app.get('/ask', async (req, res) => {
 
 app.get('/search-tours', async (req, res) => {
   process.stdout.write('📥 Вызван GET /search-tours\n');
+  console.log('👉 req.query.args:', req.query.args);  // ← добавь это
 
   try {
     const toolCallId = req.query.tool_call_id;
