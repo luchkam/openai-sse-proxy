@@ -112,10 +112,11 @@ app.post('/search-tours', async (req, res) => {
     process.stdout.write(`📦 Аргументы функции: ${JSON.stringify(args, null, 2)}\n`);
 
     // 👉 Пример запроса к Tourvisor API (заглушка, заменим реальными данными)
-    const tourvisorResponse = await axios.post('https://sse-proxy.onrender.com/test-search', args);
-
-    // Берём первые 3 тура
-    const tours = tourvisorResponse.data.tours?.slice(0, 3) ?? [];
+const tours = [
+  "Тур в Турцию, отель Example Resort ★★★★ – 320 000 ₸",
+  "Тур в Турцию, отель Beach Paradise ★★★ – 290 000 ₸",
+  "Тур в Турцию, отель Family Club ★★★★★ – 350 000 ₸"
+];
 
     const resultText = tours.length
       ? tours.map((t, i) => `${i + 1}. ${t}`).join('\n')
