@@ -87,20 +87,19 @@ app.get('/ask', async (req, res) => {
   }
 });
 
-// Эндпоинт для поиска туров
-app.post('/search-tours', async (req, res) => {
-  const { departureId, countryId, dateFrom, nights, adults, children = 0, stars = 0, mealCode = '' } = req.body;
+// Эндпоинт для поиска туров (GET)
+app.get('/search-tours', async (req, res) => {
+  const { departureId, countryId, dateFrom, nights, adults, children = 0, stars = 0, mealCode = '' } = req.query;
 
-  // Валидация
+  // Валидация параметров
   if (!departureId || !countryId || !dateFrom || !nights || !adults) {
     process.stdout.write('❌ Не хватает обязательных параметров\n');
-    return res.status(400).json({ error: 'Не хватает обязательных параметров' });
+    return res.status(400).json({ error: 'Укажите departureId, countryId, dateFrom, nights, adults' });
   }
 
-  process.stdout.write(`🔍 Поиск туров: ${JSON.stringify(req.body)}\n`);
+  process.stdout.write(`🔍 Поиск туров: ${JSON.stringify(req.query)}\n`);
 
   try {
-    // 1. Запуск поиска
     const searchParams = new URLSearchParams({
       authlogin: process.env.TOURVISOR_LOGIN,
       authpass: process.env.TOURVISOR_PASS,
@@ -112,12 +111,12 @@ app.post('/search-tours', async (req, res) => {
       child: children,
       stars: stars,
       meal: mealCode,
-      currency: 3,
+      currency: 3, // Тенге
       format: 'json'
     });
 
     const searchUrl = `http://tourvisor.ru/xml/search.php?${searchParams}`;
-    process.stdout.write(`🚀 Запрос: ${searchUrl}\n`);
+    process.stdout.write(`🚀 Запрос к Tourvisor: ${searchUrl}\n`);
 
     const { data: { requestid } } = await axios.get(searchUrl);
     process.stdout.write(`🆔 ID запроса: ${requestid}\n`);
