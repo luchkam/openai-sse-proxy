@@ -95,6 +95,19 @@ app.get('/ask', async (req, res) => {
   }
 });
 
+app.post('/search-tours', async (req, res) => {
+  process.stdout.write('📥 Вызов функции search_tours от ассистента\n');
+
+  const payload = req.body;
+  process.stdout.write(`🔧 Полученные параметры: ${JSON.stringify(payload)}\n`);
+
+  // Временно — просто тестовый ответ
+  res.json({
+    message: "Функция search_tours вызвана успешно",
+    received: payload
+  });
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   process.stdout.write(`✅ SSE Proxy Server listening on port ${PORT}\n`); // Логируем запуск сервера
