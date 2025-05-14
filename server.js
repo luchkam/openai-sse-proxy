@@ -7,9 +7,9 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Новый endpoint для создания потока
+// Эндпоинт для создания thread с Assistant
 app.get('/new-thread', async (req, res) => {
-  process.stdout.write('Создание нового потока...\n'); // Логируем начало
+  process.stdout.write('Создание нового потока...\n');
   try {
     const response = await axios.post(
       'https://api.openai.com/v1/threads',
@@ -21,43 +21,36 @@ app.get('/new-thread', async (req, res) => {
         },
       }
     );
-    process.stdout.write(`Новый thread_id создан: ${response.data.id}\n`); // Логируем успешный ответ
+    process.stdout.write(`Новый thread_id: ${response.data.id}\n`);
     res.json({ thread_id: response.data.id });
   } catch (err) {
-    process.stdout.write(`Ошибка при создании thread_id: ${err.message}\n`); // Логируем ошибку
-    res.status(500).json({ error: 'Не удалось создать thread_id' });
+    process.stdout.write(`Ошибка: ${err.message}\n`);
+    res.status(500).json({ error: 'Ошибка создания thread' });
   }
 });
 
-// SSE endpoint для генерации и потоковой передачи ответа
+// Эндпоинт для общения с Assistant
 app.get('/ask', async (req, res) => {
-  const userMessage = req.query.message;
-  const threadId = req.query.thread_id;
-
-  if (!threadId) {
-    process.stdout.write('Ошибка: отсутствует thread_id\n'); // Логируем отсутствие thread_id
-    res.status(400).json({ error: 'thread_id отсутствует' });
-    return;
+  const { message, thread_id } = req.query;
+  
+  if (!thread_id) {
+    process.stdout.write('Ошибка: нет thread_id\n');
+    return res.status(400).json({ error: 'Требуется thread_id' });
   }
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
 
-  process.stdout.write(`Запрос к OpenAI с thread_id: ${threadId}, сообщение: ${userMessage}\n`); // Логируем начало запроса
+  process.stdout.write(`Запрос к Assistant: ${message}\n`);
 
   try {
     const run = await axios.post(
-      `https://api.openai.com/v1/threads/${threadId}/runs`,
+      `https://api.openai.com/v1/threads/${thread_id}/runs`,
       {
         assistant_id: process.env.ASSISTANT_ID,
         stream: true,
-        additional_messages: [
-          {
-            role: 'user',
-            content: userMessage,
-          },
-        ],
+        additional_messages: [{ role: 'user', content: message }],
       },
       {
         headers: {
@@ -70,39 +63,44 @@ app.get('/ask', async (req, res) => {
 
     run.data.on('data', (chunk) => {
       const lines = chunk.toString().split('\n');
-      for (const line of lines) {
+      lines.forEach(line => {
         if (line.startsWith('data: ')) {
-          const jsonStr = line.slice(6);
-          if (jsonStr !== '[DONE]') {
-            res.write(`data: ${jsonStr}\n\n`);
-            process.stdout.write(`Отправлено: ${jsonStr}\n`); // Логируем отправку данных
+          const data = line.slice(6);
+          if (data !== '[DONE]') {
+            res.write(`data: ${data}\n\n`);
+            process.stdout.write(`Данные: ${data}\n`);
           }
         }
-      }
+      });
     });
 
     run.data.on('end', () => {
       res.write('data: [DONE]\n\n');
       res.end();
-      process.stdout.write('Поток завершен\n'); // Логируем завершение потока
+      process.stdout.write('Поток завершен\n');
     });
 
   } catch (error) {
-    process.stdout.write(`Ошибка в /ask: ${error.message}\n`); // Логируем ошибку
-    console.error('Ошибка в /ask:', error.message);
+    process.stdout.write(`Ошибка: ${error.message}\n`);
     res.write(`data: {"error":"${error.message}"}\n\n`);
     res.end();
   }
 });
 
+// Эндпоинт для поиска туров
 app.post('/search-tours', async (req, res) => {
-  const { departureId, countryId, dateFrom, nights, adults, children, stars, mealCode } = req.body;
+  const { departureId, countryId, dateFrom, nights, adults, children = 0, stars = 0, mealCode = '' } = req.body;
 
-  // Логируем запрос
+  // Валидация
+  if (!departureId || !countryId || !dateFrom || !nights || !adults) {
+    process.stdout.write('❌ Не хватает обязательных параметров\n');
+    return res.status(400).json({ error: 'Не хватает обязательных параметров' });
+  }
+
   process.stdout.write(`🔍 Поиск туров: ${JSON.stringify(req.body)}\n`);
 
-  // 1. Запуск поиска через Tourvisor API
   try {
+    // 1. Запуск поиска
     const searchParams = new URLSearchParams({
       authlogin: process.env.TOURVISOR_LOGIN,
       authpass: process.env.TOURVISOR_PASS,
@@ -111,45 +109,43 @@ app.post('/search-tours', async (req, res) => {
       datefrom: dateFrom,
       nightsto: nights,
       adults: adults,
-      child: children || 0,
-      stars: stars || 0,
-      meal: mealCode || '',
-      currency: 3, // Тенге
+      child: children,
+      stars: stars,
+      meal: mealCode,
+      currency: 3,
       format: 'json'
     });
 
     const searchUrl = `http://tourvisor.ru/xml/search.php?${searchParams}`;
-    process.stdout.write(`🚀 Запрос к Tourvisor: ${searchUrl}\n`);
+    process.stdout.write(`🚀 Запрос: ${searchUrl}\n`);
 
-    const searchResponse = await axios.get(searchUrl);
-    const requestId = searchResponse.data.requestid;
-    process.stdout.write(`🆔 ID запроса Tourvisor: ${requestId}\n`);
+    const { data: { requestid } } = await axios.get(searchUrl);
+    process.stdout.write(`🆔 ID запроса: ${requestid}\n`);
 
-    // 2. Ожидаем завершения поиска (проверяем статус каждые 2 секунды)
-    let attempts = 0;
+    // 2. Получение результатов
     let searchData;
-
-    while (attempts < 5) {
+    for (let attempt = 0; attempt < 5; attempt++) {
       await new Promise(resolve => setTimeout(resolve, 2000));
-      const statusUrl = `http://tourvisor.ru/xml/result.php?requestid=${requestId}&type=status&format=json`;
-      const statusResponse = await axios.get(statusUrl);
+      const { data: statusData } = await axios.get(
+        `http://tourvisor.ru/xml/result.php?requestid=${requestid}&type=status&format=json`
+      );
 
-      if (statusResponse.data.status.state === 'finished') {
-        process.stdout.write(`✅ Поиск завершен. Найдено туров: ${statusResponse.data.status.toursfound}\n`);
-        // 3. Получаем результаты
-        const resultUrl = `http://tourvisor.ru/xml/result.php?requestid=${requestId}&type=result&format=json`;
-        searchData = (await axios.get(resultUrl)).data;
+      if (statusData.status.state === 'finished') {
+        process.stdout.write(`✅ Найдено туров: ${statusData.status.toursfound}\n`);
+        const { data } = await axios.get(
+          `http://tourvisor.ru/xml/result.php?requestid=${requestid}&type=result&format=json`
+        );
+        searchData = data;
         break;
       }
-      attempts++;
     }
 
     if (!searchData) {
-      throw new Error('Превышено время ожидания ответа от Tourvisor');
+      throw new Error('Tourvisor не ответил за 10 секунд');
     }
 
-    // 4. Форматируем топ-3 тура для Assistant
-    const topTours = searchData.result.hotel.slice(0, 3).map(hotel => ({
+    // 3. Форматирование ответа
+    const tours = searchData.result.hotel.slice(0, 3).map(hotel => ({
       hotel: hotel.hotelname,
       price: hotel.price,
       nights: hotel.tours[0].nights,
@@ -158,15 +154,15 @@ app.post('/search-tours', async (req, res) => {
       operator: hotel.tours[0].operatorname
     }));
 
-    res.json({ tours: topTours });
+    res.json({ tours });
 
   } catch (error) {
     process.stdout.write(`❌ Ошибка: ${error.message}\n`);
-    res.status(500).json({ error: 'Не удалось найти туры' });
+    res.status(500).json({ error: 'Ошибка поиска туров' });
   }
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  process.stdout.write(`✅ SSE Proxy Server listening on port ${PORT}\n`); // Логируем запуск сервера
+  process.stdout.write(`✅ Сервер запущен на порту ${PORT}\n`);
 });
