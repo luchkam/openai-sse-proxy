@@ -98,11 +98,6 @@ app.get('/ask', async (req, res) => {
 app.post('/search-tours', async (req, res) => {
   process.stdout.write('📥 Вызван endpoint /search-tours\n');
 
-  // Логируем весь body, чтобы видеть, что прислал OpenAI
-  const rawBody = JSON.stringify(req.body, null, 2);
-  process.stdout.write(`📝 Тело запроса:\n${rawBody}\n`);
-
-  // Пробуем вытащить tool_call_id
   try {
     const toolCall = req.body?.tool_calls?.[0];
     if (!toolCall) {
@@ -110,27 +105,46 @@ app.post('/search-tours', async (req, res) => {
       return res.status(400).json({ error: 'tool_call not found' });
     }
 
-    // Возвращаем фейковый ответ
-    const fakeResult = `
-Найдено 3 тура:
-1. Тур в Турцию, отель Example Resort ★★★★ – 320 000 ₸
-2. Тур в Турцию, отель Beach Paradise ★★★ – 290 000 ₸
-3. Тур в Турцию, отель Family Club ★★★★★ – 350 000 ₸
-    `;
+    const threadId = req.body.thread_id;
+    const runId = req.body.run_id;
 
-    res.json({
-      tool_outputs: [
-        {
-          tool_call_id: toolCall.id,
-          output: fakeResult
-        }
-      ]
-    });
+    const args = JSON.parse(toolCall.function.arguments);
+    process.stdout.write(`📦 Аргументы функции: ${JSON.stringify(args, null, 2)}\n`);
 
-    process.stdout.write('✅ Ответ отправлен ассистенту\n');
+    // 👉 Пример запроса к Tourvisor API (заглушка, заменим реальными данными)
+    const tourvisorResponse = await axios.post('https://sse-proxy.onrender.com/test-search', args);
+
+    // Берём первые 3 тура
+    const tours = tourvisorResponse.data.tours?.slice(0, 3) ?? [];
+
+    const resultText = tours.length
+      ? tours.map((t, i) => `${i + 1}. ${t}`).join('\n')
+      : '❌ Туры не найдены. Попробуйте изменить параметры поиска.';
+
+    // 📨 Отправляем tool_output обратно в OpenAI
+    await axios.post(
+      `https://api.openai.com/v1/threads/${threadId}/runs/${runId}/submit_tool_outputs`,
+      {
+        tool_outputs: [
+          {
+            tool_call_id: toolCall.id,
+            output: resultText,
+          },
+        ],
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          'OpenAI-Beta': 'assistants=v2',
+        },
+      }
+    );
+
+    process.stdout.write('✅ Ответ ассистенту отправлен успешно\n');
+    res.json({ status: 'ok' });
   } catch (err) {
     process.stdout.write(`❌ Ошибка при обработке функции: ${err.message}\n`);
-    res.status(500).json({ error: 'Ошибка при обработке' });
+    res.status(500).json({ error: 'Ошибка при обработке запроса' });
   }
 });
 
