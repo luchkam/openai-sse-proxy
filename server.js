@@ -97,7 +97,7 @@ app.get('/ask', async (req, res) => {
 
 app.get('/search-tours', async (req, res) => {
   process.stdout.write('📥 Вызван GET /search-tours\n');
-  console.log('👉 req.query.args:', req.query.args);  // ← добавь это
+  console.log('👉 req.query.args:', req.query.args);
 
   try {
     const toolCallId = req.query.tool_call_id;
@@ -142,7 +142,45 @@ app.get('/search-tours', async (req, res) => {
     );
 
     process.stdout.write('✅ Ответ отправлен ассистенту\n');
-    res.json({ status: 'ok' });
+
+    // ⏳ Ждём завершения run
+    let completed = false;
+    let attempts = 0;
+    while (!completed && attempts < 10) {
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      const runStatus = await axios.get(
+        `https://api.openai.com/v1/threads/${threadId}/runs/${runId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+            'OpenAI-Beta': 'assistants=v2',
+          }
+        }
+      );
+
+      if (runStatus.data.status === 'completed') {
+        completed = true;
+        break;
+      }
+
+      attempts++;
+    }
+
+    // 📬 Получаем ответ Assistant
+    const messages = await axios.get(
+      `https://api.openai.com/v1/threads/${threadId}/messages`,
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          'OpenAI-Beta': 'assistants=v2',
+        }
+      }
+    );
+
+    const lastMessage = messages.data.data?.[0]?.content?.[0]?.text?.value || '❌ Нет сообщения от ассистента';
+    process.stdout.write(`📩 Ответ ассистента: ${lastMessage}\n`);
+
+    res.json({ status: 'ok', message: lastMessage });
   } catch (err) {
     process.stdout.write(`❌ Ошибка: ${err.message}\n`);
     res.status(500).json({ error: 'Ошибка при обработке запроса' });
