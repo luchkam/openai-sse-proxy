@@ -96,8 +96,13 @@ app.get('/ask', async (req, res) => {
 });
 
 app.post('/search-tours', async (req, res) => {
-  process.stdout.write('📥 Получен вызов функции search_tours от OpenAI Assistant\n');
+  process.stdout.write('📥 Вызван endpoint /search-tours\n');
 
+  // Логируем весь body, чтобы видеть, что прислал OpenAI
+  const rawBody = JSON.stringify(req.body, null, 2);
+  process.stdout.write(`📝 Тело запроса:\n${rawBody}\n`);
+
+  // Пробуем вытащить tool_call_id
   try {
     const toolCall = req.body?.tool_calls?.[0];
     if (!toolCall) {
@@ -105,24 +110,14 @@ app.post('/search-tours', async (req, res) => {
       return res.status(400).json({ error: 'tool_call not found' });
     }
 
-    const args = JSON.parse(toolCall.function.arguments);
-    const {
-      departure, country, datefrom, dateto,
-      nightsfrom, nightsto, adults, child,
-      childage1, childage2
-    } = args;
-
-    process.stdout.write(`🔍 Параметры поиска:\n${JSON.stringify(args, null, 2)}\n`);
-
-    // Пока просто фиктивный ответ
+    // Возвращаем фейковый ответ
     const fakeResult = `
 Найдено 3 тура:
-1. Тур в ${country}, отель Example Resort ★★★★ – 320 000 ₸
-2. Тур в ${country}, отель Beach Paradise ★★★ – 290 000 ₸
-3. Тур в ${country}, отель Family Club ★★★★★ – 350 000 ₸
+1. Тур в Турцию, отель Example Resort ★★★★ – 320 000 ₸
+2. Тур в Турцию, отель Beach Paradise ★★★ – 290 000 ₸
+3. Тур в Турцию, отель Family Club ★★★★★ – 350 000 ₸
     `;
 
-    // Возвращаем ответ в OpenAI Assistant
     res.json({
       tool_outputs: [
         {
@@ -132,10 +127,10 @@ app.post('/search-tours', async (req, res) => {
       ]
     });
 
-    process.stdout.write('✅ Ответ отправлен в ассистент\n');
+    process.stdout.write('✅ Ответ отправлен ассистенту\n');
   } catch (err) {
-    process.stdout.write(`❌ Ошибка в /search-tours: ${err.message}\n`);
-    res.status(500).json({ error: 'Ошибка на сервере' });
+    process.stdout.write(`❌ Ошибка при обработке функции: ${err.message}\n`);
+    res.status(500).json({ error: 'Ошибка при обработке' });
   }
 });
 
