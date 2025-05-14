@@ -143,31 +143,11 @@ app.get('/search-tours', async (req, res) => {
 
     process.stdout.write('✅ Ответ отправлен ассистенту\n');
 
-    // ⏳ Ждём завершения run
-    let completed = false;
-    let attempts = 0;
-    while (!completed && attempts < 10) {
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      const runStatus = await axios.get(
-        `https://api.openai.com/v1/threads/${threadId}/runs/${runId}`,
-        {
-          headers: {
-            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-            'OpenAI-Beta': 'assistants=v2',
-          }
-        }
-      );
+    // ⏳ Дождёмся нового сообщения ассистента (после submit)
+    const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+    await delay(1500); // небольшая пауза, чтобы ассистент успел сгенерировать сообщение
 
-      if (runStatus.data.status === 'completed') {
-        completed = true;
-        break;
-      }
-
-      attempts++;
-    }
-
-    // 📬 Получаем ответ Assistant
-    const messages = await axios.get(
+    const messagesResp = await axios.get(
       `https://api.openai.com/v1/threads/${threadId}/messages`,
       {
         headers: {
@@ -177,10 +157,13 @@ app.get('/search-tours', async (req, res) => {
       }
     );
 
-    const lastMessage = messages.data.data?.[0]?.content?.[0]?.text?.value || '❌ Нет сообщения от ассистента';
-    process.stdout.write(`📩 Ответ ассистента: ${lastMessage}\n`);
+    const messages = messagesResp.data.data;
+    const lastMessage = messages.find(m => m.role === 'assistant' && m.content.length > 0);
+    const finalText = lastMessage?.content[0]?.text?.value || 'Ответ ассистента не получен';
 
-    res.json({ status: 'ok', message: lastMessage });
+    process.stdout.write(`📩 Ответ ассистента: ${finalText}\n`);
+    res.json({ message: finalText });
+
   } catch (err) {
     process.stdout.write(`❌ Ошибка: ${err.message}\n`);
     res.status(500).json({ error: 'Ошибка при обработке запроса' });
