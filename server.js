@@ -64,7 +64,6 @@ app.get('/ask', async (req, res) => {
   const threadId = req.query.thread_id;
 
   if (!threadId) {
-    process.stdout.write('Ошибка: отсутствует thread_id\n'); // Логируем отсутствие thread_id
     res.status(400).json({ error: 'thread_id отсутствует' });
     return;
   }
@@ -72,8 +71,6 @@ app.get('/ask', async (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
-
-  process.stdout.write(`Запрос к OpenAI с thread_id: ${threadId}, сообщение: ${userMessage}\n`); // Логируем начало запроса
 
   try {
     const run = await axios.post(
@@ -97,14 +94,51 @@ app.get('/ask', async (req, res) => {
       }
     );
 
-    run.data.on('data', (chunk) => {
+    let toolCallInfo = null;
+
+    run.data.on('data', async (chunk) => {
       const lines = chunk.toString().split('\n');
       for (const line of lines) {
         if (line.startsWith('data: ')) {
           const jsonStr = line.slice(6);
-          if (jsonStr !== '[DONE]') {
+          if (jsonStr === '[DONE]') {
+            res.write('data: [DONE]\n\n');
+            res.end();
+            return;
+          }
+
+          const parsed = JSON.parse(jsonStr);
+
+          // Если модель вызывает функцию
+          if (parsed.type === 'function_call') {
+            toolCallInfo = parsed;
+            const tool_call_id = parsed.call_id || parsed.id;
+            const args = JSON.parse(parsed.arguments);
+            const { location, unit } = args;
+
+            const output = await getWeather(location, unit);
+
+            // Отправка результата обратно в OpenAI
+            await axios.post(
+              `https://api.openai.com/v1/threads/${threadId}/runs/${parsed.run_id}/submit_tool_outputs`,
+              {
+                tool_outputs: [
+                  {
+                    tool_call_id,
+                    output,
+                  },
+                ],
+              },
+              {
+                headers: {
+                  Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+                  'OpenAI-Beta': 'assistants=v2',
+                },
+              }
+            );
+          } else {
+            // Если обычный текст
             res.write(`data: ${jsonStr}\n\n`);
-            process.stdout.write(`Отправлено: ${jsonStr}\n`); // Логируем отправку данных
           }
         }
       }
@@ -113,55 +147,11 @@ app.get('/ask', async (req, res) => {
     run.data.on('end', () => {
       res.write('data: [DONE]\n\n');
       res.end();
-      process.stdout.write('Поток завершен\n'); // Логируем завершение потока
     });
 
   } catch (error) {
-    process.stdout.write(`Ошибка в /ask: ${error.message}\n`); // Логируем ошибку
-    console.error('Ошибка в /ask:', error.message);
     res.write(`data: {"error":"${error.message}"}\n\n`);
     res.end();
-  }
-});
-
-app.get('/submit-tool-outputs', async (req, res) => {
-  const { run_id, thread_id, tool_call_id, tool_name, args } = req.query;
-
-  process.stdout.write(`🔧 Обработка функции ${tool_name}...\n`);
-
-  let output = '';
-
-  if (tool_name === 'get_weather') {
-    const parsed = JSON.parse(args);
-    output = await getWeather(parsed.location, parsed.unit);
-  } else {
-    output = 'Функция не найдена';
-  }
-
-  try {
-    const result = await axios.post(
-      `https://api.openai.com/v1/threads/${thread_id}/runs/${run_id}/submit_tool_outputs`,
-      {
-        tool_outputs: [
-          {
-            tool_call_id,
-            output
-          }
-        ]
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-          'OpenAI-Beta': 'assistants=v2',
-          'Content-Type': 'application/json'
-        }
-      }
-    );
-
-    res.json({ success: true, data: result.data });
-  } catch (error) {
-    process.stdout.write(`❌ Ошибка при submit_tool_outputs: ${error.message}\n`);
-    res.status(500).json({ error: error.message });
   }
 });
 
