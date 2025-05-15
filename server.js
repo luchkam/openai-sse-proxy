@@ -93,74 +93,92 @@ app.get('/ask', async (req, res) => {
       }
     );
 
-    let buffer = '';
-    
+    let runId = null;
+    let requiresActionData = null;
+
     run.data.on('data', async (chunk) => {
-      buffer += chunk.toString();
-      
-      // Обрабатываем все завершенные строки
-      const lines = buffer.split('\n');
-      buffer = lines.pop(); // Оставляем неполную строку в буфере
-      
+      const lines = chunk.toString().split('\n');
       for (const line of lines) {
         if (line.startsWith('data: ')) {
           const jsonStr = line.slice(6);
-          
-          if (jsonStr === '[DONE]') {
-            res.write('data: [DONE]\n\n');
-            continue;
-          }
-          
-          try {
-            const data = JSON.parse(jsonStr);
-            
-            // Обработка вызова функции get_weather
-            if (data.event === 'thread.run.requires_action' && 
-                data.data?.required_action?.type === 'submit_tool_outputs') {
-              const toolCalls = data.data.required_action.submit_tool_outputs.tool_calls;
-              const outputs = [];
+          if (jsonStr !== '[DONE]') {
+            try {
+              const data = JSON.parse(jsonStr);
+              
+              // Сохраняем runId для последующего использования
+              if (data.id && data.object === 'thread.run') {
+                runId = data.id;
+              }
 
-              for (const call of toolCalls) {
-                if (call.function.name === 'get_weather') {
-                  try {
-                    const args = JSON.parse(call.function.arguments);
-                    const weather = await getWeather(args.location, args.unit);
-                    outputs.push({
-                      tool_call_id: call.id,
-                      output: JSON.stringify(weather)
-                    });
-                  } catch (err) {
-                    console.error('Ошибка обработки функции:', err);
-                    outputs.push({
-                      tool_call_id: call.id,
-                      output: JSON.stringify({ error: err.message })
-                    });
+              // Обрабатываем requires_action
+              if (data.event === 'thread.run.requires_action') {
+                requiresActionData = data.data;
+                const toolCalls = data.data.required_action.submit_tool_outputs.tool_calls;
+                const outputs = [];
+
+                for (const call of toolCalls) {
+                  if (call.function.name === 'get_weather') {
+                    try {
+                      const args = JSON.parse(call.function.arguments);
+                      const weather = await getWeather(args.location, args.unit);
+                      outputs.push({
+                        tool_call_id: call.id,
+                        output: JSON.stringify(weather)
+                      });
+                    } catch (err) {
+                      console.error('Ошибка выполнения функции:', err);
+                      outputs.push({
+                        tool_call_id: call.id,
+                        output: JSON.stringify({ error: err.message })
+                      });
+                    }
                   }
                 }
-              }
 
-              if (outputs.length > 0) {
-                await axios.post(
-                  `https://api.openai.com/v1/threads/${threadId}/runs/${data.data.id}/submit_tool_outputs`,
-                  { tool_outputs: outputs },
-                  { headers: { 
-                    Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 
-                    'OpenAI-Beta': 'assistants=v2' 
-                  }}
-                );
+                // Отправляем результаты выполнения функции
+                if (outputs.length > 0) {
+                  await axios.post(
+                    `https://api.openai.com/v1/threads/${threadId}/runs/${runId}/submit_tool_outputs`,
+                    { tool_outputs: outputs },
+                    { 
+                      headers: { 
+                        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+                        'OpenAI-Beta': 'assistants=v2'
+                      },
+                      responseType: 'stream'
+                    }
+                  ).then(submitResponse => {
+                    // Продолжаем поток с результатами
+                    submitResponse.data.on('data', (chunk) => {
+                      res.write(chunk.toString());
+                    });
+                  });
+                }
+              } else {
+                // Продолжаем поток для обычных сообщений
+                res.write(`data: ${jsonStr}\n\n`);
               }
+            } catch (err) {
+              console.error('Ошибка обработки данных:', err);
             }
-            
-            res.write(`data: ${jsonStr}\n\n`);
-            process.stdout.write(`Отправлено: ${jsonStr}\n`);
-            
-          } catch (err) {
-            console.error('Ошибка парсинга JSON:', err);
-            console.error('Оригинальные данные:', jsonStr);
           }
         }
       }
     });
+
+    run.data.on('end', () => {
+      res.write('data: [DONE]\n\n');
+      res.end();
+      process.stdout.write('Поток завершен\n');
+    });
+
+  } catch (error) {
+    process.stdout.write(`Ошибка в /ask: ${error.message}\n`);
+    console.error('Ошибка в /ask:', error);
+    res.write(`data: {"error":"${error.message}"}\n\n`);
+    res.end();
+  }
+});
 
     run.data.on('end', () => {
       if (buffer.trim()) {
