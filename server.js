@@ -71,98 +71,104 @@ app.get('/ask', async (req, res) => {
     let buffer = '';
 
     run.data.on('data', async (chunk) => {
-      const lines = chunk.toString().split('\n');
+  const lines = chunk.toString().split('\n');
 
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const jsonStr = line.slice(6);
-          if (jsonStr === '[DONE]') {
-            res.write('data: [DONE]\n\n');
-            res.end();
-            process.stdout.write('Поток завершен\n');
-            return;
+  for (const line of lines) {
+    if (!line.startsWith('data: ')) continue;
+
+    const jsonStr = line.slice(6);
+    if (jsonStr === '[DONE]') {
+      res.write('data: [DONE]\n\n');
+      res.end();
+      process.stdout.write('Поток завершен\n');
+      return;
+    }
+
+    let data;
+    try {
+      data = JSON.parse(jsonStr);
+    } catch (e) {
+      continue;
+    }
+
+    // 🛑 Ловим requires_action и обрабатываем tool_call
+    if (
+      data.event === 'thread.run.requires_action' &&
+      data.data?.required_action?.submit_tool_outputs
+    ) {
+      const toolCall = data.data.required_action.submit_tool_outputs.tool_calls[0];
+      const run_id = data.data.id;
+      const args = JSON.parse(toolCall.function.arguments);
+      const { location, unit } = args;
+
+      process.stdout.write(`🌍 Обработка get_weather для: ${location} (${unit})\n`);
+
+      try {
+        // Определяем координаты
+        const geo = await axios.get('https://nominatim.openstreetmap.org/search', {
+          params: {
+            q: location,
+            format: 'json',
+            limit: 1,
+          },
+        });
+
+        if (!geo.data.length) throw new Error('Город не найден');
+
+        const lat = geo.data[0].lat;
+        const lon = geo.data[0].lon;
+
+        // Получаем погоду
+        const meteo = await axios.get('https://api.open-meteo.com/v1/forecast', {
+          params: {
+            latitude: lat,
+            longitude: lon,
+            current: 'temperature_2m',
+          },
+        });
+
+        const tempC = meteo.data.current.temperature_2m;
+        const temp = unit === 'f' ? (tempC * 9) / 5 + 32 : tempC;
+        const formatted = `${temp.toFixed(1)}°${unit === 'f' ? 'F' : 'C'}`;
+
+        // Отправка результата
+        await axios.post(
+          `https://api.openai.com/v1/threads/${threadId}/runs/${run_id}/submit_tool_outputs`,
+          {
+            tool_outputs: [
+              {
+                tool_call_id: toolCall.id,
+                output: `The temperature in ${location} is ${formatted}`,
+              },
+            ],
+          },
+          {
+            headers: {
+              Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+              'OpenAI-Beta': 'assistants=v2',
+            },
           }
+        );
 
-          // Пытаемся распарсить JSON
-          let data;
-          try {
-            data = JSON.parse(jsonStr);
-          } catch (e) {
-            continue;
-          }
-
-          // ✅ Проверка на requires_action
-          if (data.required_action && data.required_action.submit_tool_outputs) {
-            const toolCall = data.required_action.submit_tool_outputs.tool_calls[0];
-            const args = JSON.parse(toolCall.function.arguments);
-            const { location, unit } = args;
-            const tool_call_id = toolCall.id;
-            const run_id = data.id;
-
-            process.stdout.write(`🌍 Вызов функции get_weather: ${location}, ${unit}\n`);
-
-            try {
-              // Определяем координаты через Nominatim
-              const geo = await axios.get('https://nominatim.openstreetmap.org/search', {
-                params: {
-                  q: location,
-                  format: 'json',
-                  limit: 1,
-                },
-              });
-
-              if (!geo.data.length) throw new Error('Город не найден');
-
-              const lat = geo.data[0].lat;
-              const lon = geo.data[0].lon;
-
-              // Получаем погоду через OpenMeteo
-              const meteo = await axios.get('https://api.open-meteo.com/v1/forecast', {
-                params: {
-                  latitude: lat,
-                  longitude: lon,
-                  current: 'temperature_2m',
-                },
-              });
-
-              const tempC = meteo.data.current.temperature_2m;
-              const temp = unit === 'f' ? (tempC * 9) / 5 + 32 : tempC;
-              const formatted = `${temp.toFixed(1)}°${unit === 'f' ? 'F' : 'C'}`;
-
-              // Отправка результата в OpenAI
-              await axios.post(
-                `https://api.openai.com/v1/threads/${threadId}/runs/${run_id}/submit_tool_outputs`,
-                {
-                  tool_outputs: [
-                    {
-                      tool_call_id,
-                      output: `The temperature in ${location} is ${formatted}`,
-                    },
-                  ],
-                },
-                {
-                  headers: {
-                    Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-                    'OpenAI-Beta': 'assistants=v2',
-                  },
-                }
-              );
-
-              process.stdout.write(`✅ Отправлен результат: ${formatted}\n`);
-            } catch (err) {
-              process.stdout.write(`❌ Ошибка в обработке get_weather: ${err.message}\n`);
-              res.write(`data: {"error":"${err.message}"}\n\n`);
-              res.end();
-              return;
-            }
-          } else {
-            // Обычные текстовые ответы
-            res.write(`data: ${jsonStr}\n\n`);
-            process.stdout.write(`Отправлено: ${jsonStr}\n`);
-          }
-        }
+        process.stdout.write(`✅ Температура отправлена: ${formatted}\n`);
+      } catch (err) {
+        process.stdout.write(`❌ Ошибка get_weather: ${err.message}\n`);
+        res.write(`data: {"error":"${err.message}"}\n\n`);
+        res.end();
+        return;
       }
-    });
+    }
+
+    // Обычные сообщения
+    if (data.event === 'thread.message.delta') {
+      const content = data.delta?.content?.[0]?.text?.value;
+      if (content) {
+        res.write(`data: ${JSON.stringify({ content })}\n\n`);
+        process.stdout.write(`📤 ${content}\n`);
+      }
+    }
+  }
+});
 
   } catch (error) {
     process.stdout.write(`Ошибка в /ask: ${error.message}\n`);
