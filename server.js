@@ -180,23 +180,6 @@ app.get('/ask', async (req, res) => {
   }
 });
 
-    run.data.on('end', () => {
-      if (buffer.trim()) {
-        console.warn('Необработанные данные в буфере:', buffer);
-      }
-      res.write('data: [DONE]\n\n');
-      res.end();
-      process.stdout.write('Поток завершен\n');
-    });
-
-  } catch (error) {
-    process.stdout.write(`Ошибка в /ask: ${error.message}\n`);
-    console.error('Ошибка в /ask:', error);
-    res.write(`data: {"error":"${error.message}"}\n\n`);
-    res.end();
-  }
-});
-
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   process.stdout.write(`✅ SSE Proxy Server listening on port ${PORT}\n`); // Логируем запуск сервера
