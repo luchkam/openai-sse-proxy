@@ -2,10 +2,39 @@ const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
 require('dotenv').config();
+const fetch = require('node-fetch');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+async function getWeather(location, unit) {
+  try {
+    const geoRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(location)}`);
+    const geoData = await geoRes.json();
+
+    if (!geoData || !geoData[0]) {
+      return `Не удалось найти координаты для ${location}`;
+    }
+
+    const lat = geoData[0].lat;
+    const lon = geoData[0].lon;
+
+    const weatherRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m&temperature_unit=${unit === 'f' ? 'fahrenheit' : 'celsius'}`);
+    const weatherData = await weatherRes.json();
+
+    const temp = weatherData.current?.temperature_2m;
+
+    if (temp === undefined) {
+      return `Не удалось получить данные о погоде в ${location}`;
+    }
+
+    const suffix = unit === 'f' ? '°F' : '°C';
+    return `Сейчас в ${location} около ${temp}${suffix}.`;
+  } catch (err) {
+    return `Произошла ошибка при получении погоды: ${err.message}`;
+  }
+}
 
 // Новый endpoint для создания потока
 app.get('/new-thread', async (req, res) => {
@@ -92,6 +121,47 @@ app.get('/ask', async (req, res) => {
     console.error('Ошибка в /ask:', error.message);
     res.write(`data: {"error":"${error.message}"}\n\n`);
     res.end();
+  }
+});
+
+app.get('/submit-tool-outputs', async (req, res) => {
+  const { run_id, thread_id, tool_call_id, tool_name, args } = req.query;
+
+  process.stdout.write(`🔧 Обработка функции ${tool_name}...\n`);
+
+  let output = '';
+
+  if (tool_name === 'get_weather') {
+    const parsed = JSON.parse(args);
+    output = await getWeather(parsed.location, parsed.unit);
+  } else {
+    output = 'Функция не найдена';
+  }
+
+  try {
+    const result = await axios.post(
+      `https://api.openai.com/v1/threads/${thread_id}/runs/${run_id}/submit_tool_outputs`,
+      {
+        tool_outputs: [
+          {
+            tool_call_id,
+            output
+          }
+        ]
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          'OpenAI-Beta': 'assistants=v2',
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    res.json({ success: true, data: result.data });
+  } catch (error) {
+    process.stdout.write(`❌ Ошибка при submit_tool_outputs: ${error.message}\n`);
+    res.status(500).json({ error: error.message });
   }
 });
 
