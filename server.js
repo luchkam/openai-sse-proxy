@@ -1,161 +1,93 @@
 const express = require('express');
 const axios = require('axios');
-const cors = require('cors');
-const fetch = require('node-fetch');
+const { OpenAI } = require('openai');
 require('dotenv').config();
 
 const app = express();
-app.use(cors());
 app.use(express.json());
 
-async function getWeather(location, unit) {
-  try {
-    const geoRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(location)}`);
-    const geoData = await geoRes.json();
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-    if (!geoData || !geoData[0]) return `Не удалось найти координаты для ${location}`;
-    const lat = geoData[0].lat;
-    const lon = geoData[0].lon;
-
-    const weatherRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m&temperature_unit=${unit === 'f' ? 'fahrenheit' : 'celsius'}`);
-    const weatherData = await weatherRes.json();
-
-    const temp = weatherData.current?.temperature_2m;
-    if (temp === undefined) return `Не удалось получить данные о погоде в ${location}`;
-
-    const suffix = unit === 'f' ? '°F' : '°C';
-    return `Сейчас в ${location} около ${temp}${suffix}.`;
-  } catch (err) {
-    return `Произошла ошибка при получении погоды: ${err.message}`;
+const tools = [{
+  type: "function",
+  function: {
+    name: "get_weather",
+    description: "Get current temperature for provided coordinates in celsius.",
+    parameters: {
+      type: "object",
+      properties: {
+        latitude: { type: "number" },
+        longitude: { type: "number" }
+      },
+      required: ["latitude", "longitude"],
+      additionalProperties: false
+    },
+    strict: true
   }
+}];
+
+// Ваша реальная функция
+async function get_weather({ latitude, longitude }) {
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m`;
+  const res = await axios.get(url);
+  return `Current temperature is ${res.data.current.temperature_2m}°C`;
 }
 
-// Новый thread
-app.get('/new-thread', async (req, res) => {
-  try {
-    const response = await axios.post('https://api.openai.com/v1/threads', {}, {
-      headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        'OpenAI-Beta': 'assistants=v2',
-      },
-    });
-    console.log(`🧵 Новый thread: ${response.data.id}`);
-    res.json({ thread_id: response.data.id });
-  } catch (err) {
-    console.error('Ошибка создания thread:', err.message);
-    res.status(500).json({ error: 'Ошибка создания потока' });
-  }
-});
-
-// SSE ask endpoint
-app.get('/ask', async (req, res) => {
-  const { message, thread_id } = req.query;
-  if (!message || !thread_id) return res.status(400).json({ error: 'message и thread_id обязательны' });
-
+// SSE endpoint
+app.get('/weather-stream', async (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
 
-  console.log(`📨 Сообщение: ${message}, thread_id: ${thread_id}`);
+  const messages = [
+    { role: "user", content: "What's the weather like in Paris today?" }
+  ];
 
-  try {
-    const response = await axios.post(
-      `https://api.openai.com/v1/threads/${thread_id}/runs`,
-      {
-        assistant_id: process.env.ASSISTANT_ID,
-        stream: true,
-        additional_messages: [{ role: 'user', content: message }],
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-          'OpenAI-Beta': 'assistants=v2',
-        },
-        responseType: 'stream',
-      }
-    );
+  const stream = await openai.beta.threads.createAndRun({
+    assistant_id: process.env.ASSISTANT_ID,
+    thread: { messages },
+    tools,
+    stream: true
+  });
 
-    const toolCalls = {};
+  const final_tool_calls = {};
 
-    response.data.on('data', async (chunk) => {
-      const lines = chunk.toString().split('\n');
+  for await (const event of stream) {
+    if (event.event === 'thread.run.requires_action') {
+      const toolCalls = event.data.required_action.submit_tool_outputs.tool_calls;
 
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
-        const jsonStr = line.slice(6);
+      const results = await Promise.all(toolCalls.map(async (toolCall) => {
+        const name = toolCall.function.name;
+        const args = JSON.parse(toolCall.function.arguments);
 
-        if (jsonStr === '[DONE]') {
-          res.write(`data: [DONE]\n\n`);
-          res.end();
-          return;
+        let output = '';
+        if (name === 'get_weather') {
+          output = await get_weather(args);
         }
 
-        try {
-          const parsed = JSON.parse(jsonStr);
+        return {
+          tool_call_id: toolCall.id,
+          output: output.toString()
+        };
+      }));
 
-          // Обычный ответ
-          if (parsed?.delta?.content) {
-            const text = parsed.delta.content[0]?.text?.value;
-            if (text) res.write(`data: ${JSON.stringify({ text })}\n\n`);
-          }
+      await openai.beta.threads.runs.submitToolOutputs({
+        thread_id: event.data.thread_id,
+        run_id: event.data.id,
+        tool_outputs: results
+      });
 
-          // Первый шаг вызова функции
-          if (parsed.type === 'function_call') {
-            toolCalls[parsed.id] = { ...parsed, arguments: '' };
-          }
-
-          // Дельта аргументов
-          if (parsed.type === 'function_call_arguments.delta') {
-            const id = parsed.item_id;
-            if (!toolCalls[id]) toolCalls[id] = { arguments: '' };
-            toolCalls[id].arguments += parsed.delta;
-          }
-
-          // Функция готова к запуску
-          if (parsed.type === 'function_call_arguments.done') {
-            const call = toolCalls[parsed.item.id];
-            const args = JSON.parse(call.arguments);
-            const result = await getWeather(args.location, args.unit);
-
-            await axios.post(
-              `https://api.openai.com/v1/threads/${thread_id}/runs/${parsed.response_id}/submit_tool_outputs`,
-              {
-                tool_outputs: [
-                  {
-                    tool_call_id: parsed.item.id,
-                    output: result,
-                  },
-                ],
-              },
-              {
-                headers: {
-                  Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-                  'OpenAI-Beta': 'assistants=v2',
-                },
-              }
-            );
-
-            console.log(`✅ Результат функции отправлен: ${result}`);
-          }
-        } catch (err) {
-          console.warn(`⚠️ Пропущен chunk: ${jsonStr.slice(0, 100)}...`);
-        }
+    } else if (event.event === 'thread.message.delta') {
+      const text = event.data.delta.content;
+      if (text) {
+        res.write(`data: ${text}\n\n`);
       }
-    });
-
-    response.data.on('end', () => {
-      res.write(`data: [DONE]\n\n`);
+    } else if (event.event === 'thread.run.completed') {
+      res.write(`data: [done]\n\n`);
       res.end();
-      console.log('⛔️ Поток завершён');
-    });
-  } catch (error) {
-    console.error(`❌ Ошибка в /ask: ${error.message}`);
-    res.write(`data: {"error": "${error.message}"}\n\n`);
-    res.end();
+    }
   }
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`✅ SSE Proxy Server listening on port ${PORT}`);
-});
+app.listen(PORT, () => console.log(`🌤️ Weather function server running on port ${PORT}`));
