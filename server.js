@@ -48,7 +48,7 @@ const getWeather = async (location, unit) => {
       location: location,
     };
   } catch (error) {
-    console.error('Ошибка погоды:', error.message);
+    process.stdout.write(`Ошибка погоды: ${error.message}\n`);
     return { error: "Не удалось получить погоду. Проверьте название города." };
   }
 };
@@ -100,13 +100,14 @@ app.get('/ask', async (req, res) => {
         } catch (err) {
           if (
             jsonStr.includes('"instructions":"') ||
-            jsonStr.includes('"tool_calls":[') ||
+            jsonStr.includes('"tool_calls":["') ||
             jsonStr.includes('"arguments":"{') ||
             jsonStr.includes('"location')
           ) {
             return;
           }
-          process.stdout.write(`⛔️ Ошибка парсинга JSON: ${err.message}\nСтрока: ${jsonStr}\n`);
+          process.stdout.write(`⛔️ Ошибка парсинга JSON: ${err.message}\n`);
+          process.stdout.write(`Строка: ${jsonStr}\n`);
           return;
         }
 
@@ -136,9 +137,7 @@ app.get('/ask', async (req, res) => {
           }
 
           try {
-            process.stdout.write(`📡 submit_tool_outputs → run_id: ${data.data.id}, thread_id: ${threadId}\n`);
-            process.stdout.write(`📦 Outputs: ${JSON.stringify(outputs, null, 2)}\n`);
-
+            process.stdout.write(`📤 Отправка tool_outputs: ${JSON.stringify(outputs)}\n`);
             await axios.post(
               `https://api.openai.com/v1/threads/${threadId}/runs/${data.data.id}/submit_tool_outputs`,
               { tool_outputs: outputs },
@@ -149,38 +148,10 @@ app.get('/ask', async (req, res) => {
                 },
               }
             );
-
-            process.stdout.write('✅ submit_tool_outputs успешно отправлен. Ожидаем продолжение ответа...\n');
-
-            const continued = await axios.get(
-              `https://api.openai.com/v1/threads/${threadId}/runs/${data.data.id}`,
-              {
-                headers: {
-                  Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-                  'OpenAI-Beta': 'assistants=v2',
-                },
-                responseType: 'stream',
-              }
-            );
-
-            continued.data.on('data', (chunk) => {
-              const msg = chunk.toString();
-              res.write(`data: ${msg}\n\n`);
-              process.stdout.write(`📤 Ответ после submit_tool_outputs: ${msg}\n`);
-            });
-
-            continued.data.on('end', () => {
-              res.write('data: [DONE]\n\n');
-              res.end();
-              process.stdout.write('✅ Поток после submit_tool_outputs завершён\n');
-            });
+            process.stdout.write('✅ submit_tool_outputs успешно отправлены\n');
           } catch (err) {
-            process.stdout.write(`❌ Ошибка при submit_tool_outputs или продолжении: ${err.message}\n`);
-            res.write(`data: {"error":"${err.message}"}\n\n`);
-            res.end();
+            process.stdout.write(`❌ Ошибка отправки tool_outputs: ${err.message}\n`);
           }
-
-          return;
         }
 
         res.write(`data: ${jsonStr}\n\n`);
@@ -200,6 +171,7 @@ app.get('/ask', async (req, res) => {
   }
 });
 
+// Запуск сервера
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   process.stdout.write(`✅ SSE Proxy Server listening on port ${PORT}\n`);
