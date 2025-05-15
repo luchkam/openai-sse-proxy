@@ -107,7 +107,13 @@ app.get('/ask', async (req, res) => {
             return;
           }
 
-          const parsed = JSON.parse(jsonStr);
+          let parsed;
+try {
+  parsed = JSON.parse(jsonStr);
+} catch (e) {
+  process.stdout.write(`⚠️ Пропущен chunk с некорректным JSON: ${jsonStr}\n`);
+  return; // или continue
+}
 
           // Если модель вызывает функцию
           if (parsed.type === 'function_call') {
