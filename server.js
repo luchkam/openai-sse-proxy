@@ -94,24 +94,42 @@ app.get('/ask', async (req, res) => {
     );
 
     run.data.on('data', async (chunk) => {
-      const lines = chunk.toString().split('\n');
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const jsonStr = line.slice(6);
-          if (jsonStr !== '[DONE]') {
-            const data = JSON.parse(jsonStr); // Парсим JSON
-            // Обработка вызова функции get_weather
-        if (data.event === 'thread.run.requires_action' && data.data?.required_action?.type === 'submit_tool_outputs') {
+  const lines = chunk.toString().split('\n');
+
+  for (const line of lines) {
+    if (line.startsWith('data: ')) {
+      const jsonStr = line.slice(6);
+      if (jsonStr !== '[DONE]') {
+        let data;
+        try {
+          data = JSON.parse(jsonStr);
+        } catch (err) {
+          console.warn('⛔️ Ошибка парсинга JSON:', err.message, '\nСтрока:', jsonStr);
+          continue; // пропускаем этот чанк
+        }
+
+        // Обработка вызова функции get_weather
+        if (
+          data.event === 'thread.run.requires_action' &&
+          data.data?.required_action?.type === 'submit_tool_outputs'
+        ) {
           const toolCalls = data.data.required_action.submit_tool_outputs.tool_calls;
           const outputs = [];
 
           for (const call of toolCalls) {
             if (call.function.name === 'get_weather') {
-              const args = JSON.parse(call.function.arguments);
+              let args;
+              try {
+                args = JSON.parse(call.function.arguments);
+              } catch (err) {
+                console.warn('❌ Ошибка парсинга аргументов функции:', err.message);
+                continue;
+              }
+
               const weather = await getWeather(args.location, args.unit);
               outputs.push({
                 tool_call_id: call.id,
-                output: JSON.stringify(weather)
+                output: JSON.stringify(weather),
               });
             }
           }
@@ -120,15 +138,21 @@ app.get('/ask', async (req, res) => {
           await axios.post(
             `https://api.openai.com/v1/threads/${threadId}/runs/${data.data.id}/submit_tool_outputs`,
             { tool_outputs: outputs },
-            { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'OpenAI-Beta': 'assistants=v2' } }
+            {
+              headers: {
+                Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+                'OpenAI-Beta': 'assistants=v2',
+              },
+            }
           );
         }
-            res.write(`data: ${jsonStr}\n\n`);
-            process.stdout.write(`Отправлено: ${jsonStr}\n`); // Логируем отправку данных
-          }
-        }
+
+        res.write(`data: ${jsonStr}\n\n`);
+        process.stdout.write(`Отправлено: ${jsonStr}\n`);
       }
-    });
+    }
+  }
+});
 
     run.data.on('end', () => {
       res.write('data: [DONE]\n\n');
