@@ -97,60 +97,67 @@ app.get('/ask', async (req, res) => {
   const lines = chunk.toString().split('\n');
 
   for (const line of lines) {
-    if (line.startsWith('data: ')) {
-      const jsonStr = line.slice(6);
-      if (jsonStr !== '[DONE]') {
-        let data;
-        try {
-          data = JSON.parse(jsonStr);
-        } catch (err) {
-          console.warn('⛔️ Ошибка парсинга JSON:', err.message, '\nСтрока:', jsonStr);
-          continue; // пропускаем этот чанк
+    if (!line.startsWith('data: ')) continue;
+
+    const jsonStr = line.slice(6);
+    if (jsonStr === '[DONE]') continue;
+
+    let data;
+    try {
+      data = JSON.parse(jsonStr);
+    } catch (err) {
+      console.warn('⛔️ Ошибка парсинга JSON:', err.message);
+      console.warn('Строка:', jsonStr);
+      continue; // пропускаем текущий чанк
+    }
+
+    // ✅ Обработка функции get_weather только после requires_action
+    if (
+      data.event === 'thread.run.requires_action' &&
+      data.data?.required_action?.type === 'submit_tool_outputs'
+    ) {
+      const toolCalls = data.data.required_action.submit_tool_outputs.tool_calls;
+      const outputs = [];
+
+      for (const call of toolCalls) {
+        if (call.function.name === 'get_weather') {
+          let args;
+          try {
+            args = JSON.parse(call.function.arguments);
+          } catch (err) {
+            console.warn('⚠️ Ошибка парсинга arguments функции:', err.message);
+            console.warn('Аргументы:', call.function.arguments);
+            continue;
+          }
+
+          const weather = await getWeather(args.location, args.unit);
+          outputs.push({
+            tool_call_id: call.id,
+            output: JSON.stringify(weather),
+          });
         }
+      }
 
-        // Обработка вызова функции get_weather
-        if (
-  data.event === 'thread.run.requires_action' &&
-  data.data?.required_action?.type === 'submit_tool_outputs'
-) {
-  const toolCalls = data.data.required_action.submit_tool_outputs.tool_calls;
-  const outputs = [];
-
-  for (const call of toolCalls) {
-    if (call.function.name === 'get_weather') {
-      let args;
+      // ✅ Отправляем tool_outputs обратно в OpenAI
       try {
-        args = JSON.parse(call.function.arguments);
+        await axios.post(
+          `https://api.openai.com/v1/threads/${threadId}/runs/${data.data.id}/submit_tool_outputs`,
+          { tool_outputs: outputs },
+          {
+            headers: {
+              Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+              'OpenAI-Beta': 'assistants=v2',
+            },
+          }
+        );
       } catch (err) {
-        console.warn('⚠️ Аргументы ещё не готовы для парсинга:', call.function.arguments);
-        return; // можно выйти или просто пропустить
-      }
-
-      const weather = await getWeather(args.location, args.unit);
-      outputs.push({
-        tool_call_id: call.id,
-        output: JSON.stringify(weather),
-      });
-    }
-  }
-
-          // Отправляем результаты ассистенту
-          await axios.post(
-            `https://api.openai.com/v1/threads/${threadId}/runs/${data.data.id}/submit_tool_outputs`,
-            { tool_outputs: outputs },
-            {
-              headers: {
-                Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-                'OpenAI-Beta': 'assistants=v2',
-              },
-            }
-          );
-        }
-
-        res.write(`data: ${jsonStr}\n\n`);
-        process.stdout.write(`Отправлено: ${jsonStr}\n`);
+        console.error('❌ Ошибка при отправке tool_outputs:', err.message);
       }
     }
+
+    // Отправляем клиенту в поток
+    res.write(`data: ${jsonStr}\n\n`);
+    process.stdout.write(`📤 Отправлено клиенту: ${jsonStr}\n`);
   }
 });
 
