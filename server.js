@@ -93,76 +93,125 @@ app.get('/ask', async (req, res) => {
       }
     );
 
+    app.get('/ask', async (req, res) => {
+  const userMessage = req.query.message;
+  const threadId = req.query.thread_id;
+
+  if (!threadId) {
+    process.stdout.write('Ошибка: отсутствует thread_id\n');
+    res.status(400).json({ error: 'thread_id отсутствует' });
+    return;
+  }
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+
+  process.stdout.write(`Запрос к OpenAI с thread_id: ${threadId}, сообщение: ${userMessage}\n`);
+
+  try {
+    const run = await axios.post(
+      `https://api.openai.com/v1/threads/${threadId}/runs`,
+      {
+        assistant_id: process.env.ASSISTANT_ID,
+        stream: true,
+        additional_messages: [
+          {
+            role: 'user',
+            content: userMessage,
+          },
+        ],
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          'OpenAI-Beta': 'assistants=v2',
+        },
+        responseType: 'stream',
+      }
+    );
+
+    let buffer = '';
+    
     run.data.on('data', async (chunk) => {
-  const lines = chunk.toString().split('\n');
+      buffer += chunk.toString();
+      
+      // Обрабатываем все завершенные строки
+      const lines = buffer.split('\n');
+      buffer = lines.pop(); // Оставляем неполную строку в буфере
+      
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const jsonStr = line.slice(6);
+          
+          if (jsonStr === '[DONE]') {
+            res.write('data: [DONE]\n\n');
+            continue;
+          }
+          
+          try {
+            const data = JSON.parse(jsonStr);
+            
+            // Обработка вызова функции get_weather
+            if (data.event === 'thread.run.requires_action' && 
+                data.data?.required_action?.type === 'submit_tool_outputs') {
+              const toolCalls = data.data.required_action.submit_tool_outputs.tool_calls;
+              const outputs = [];
 
-  for (const line of lines) {
-    if (line.startsWith('data: ')) {
-      const jsonStr = line.slice(6);
-      if (jsonStr !== '[DONE]') {
-        let data;
-        try {
-          data = JSON.parse(jsonStr);
-        } catch (err) {
-          console.warn('⛔️ Ошибка парсинга JSON:', err.message, '\nСтрока:', jsonStr);
-          continue; // пропускаем этот чанк
-        }
-
-        // Обработка вызова функции get_weather
-        if (
-          data.event === 'thread.run.requires_action' &&
-          data.data?.required_action?.type === 'submit_tool_outputs'
-        ) {
-          const toolCalls = data.data.required_action.submit_tool_outputs.tool_calls;
-          const outputs = [];
-
-          for (const call of toolCalls) {
-            if (call.function.name === 'get_weather') {
-              let args;
-              try {
-                args = JSON.parse(call.function.arguments);
-              } catch (err) {
-                console.warn('❌ Ошибка парсинга аргументов функции:', err.message);
-                continue;
+              for (const call of toolCalls) {
+                if (call.function.name === 'get_weather') {
+                  try {
+                    const args = JSON.parse(call.function.arguments);
+                    const weather = await getWeather(args.location, args.unit);
+                    outputs.push({
+                      tool_call_id: call.id,
+                      output: JSON.stringify(weather)
+                    });
+                  } catch (err) {
+                    console.error('Ошибка обработки функции:', err);
+                    outputs.push({
+                      tool_call_id: call.id,
+                      output: JSON.stringify({ error: err.message })
+                    });
+                  }
+                }
               }
 
-              const weather = await getWeather(args.location, args.unit);
-              outputs.push({
-                tool_call_id: call.id,
-                output: JSON.stringify(weather),
-              });
+              if (outputs.length > 0) {
+                await axios.post(
+                  `https://api.openai.com/v1/threads/${threadId}/runs/${data.data.id}/submit_tool_outputs`,
+                  { tool_outputs: outputs },
+                  { headers: { 
+                    Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 
+                    'OpenAI-Beta': 'assistants=v2' 
+                  }}
+                );
+              }
             }
+            
+            res.write(`data: ${jsonStr}\n\n`);
+            process.stdout.write(`Отправлено: ${jsonStr}\n`);
+            
+          } catch (err) {
+            console.error('Ошибка парсинга JSON:', err);
+            console.error('Оригинальные данные:', jsonStr);
           }
-
-          // Отправляем результаты ассистенту
-          await axios.post(
-            `https://api.openai.com/v1/threads/${threadId}/runs/${data.data.id}/submit_tool_outputs`,
-            { tool_outputs: outputs },
-            {
-              headers: {
-                Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-                'OpenAI-Beta': 'assistants=v2',
-              },
-            }
-          );
         }
-
-        res.write(`data: ${jsonStr}\n\n`);
-        process.stdout.write(`Отправлено: ${jsonStr}\n`);
       }
-    }
-  }
-});
+    });
 
     run.data.on('end', () => {
+      if (buffer.trim()) {
+        console.warn('Необработанные данные в буфере:', buffer);
+      }
       res.write('data: [DONE]\n\n');
       res.end();
-      process.stdout.write('Поток завершен\n'); // Логируем завершение потока
+      process.stdout.write('Поток завершен\n');
     });
 
   } catch (error) {
-    process.stdout.write(`Ошибка в /ask: ${error.message}\n`); // Логируем ошибку
-    console.error('Ошибка в /ask:', error.message);
+    process.stdout.write(`Ошибка в /ask: ${error.message}\n`);
+    console.error('Ошибка в /ask:', error);
     res.write(`data: {"error":"${error.message}"}\n\n`);
     res.end();
   }
