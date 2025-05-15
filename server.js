@@ -9,7 +9,7 @@ app.use(express.json());
 
 // Новый endpoint для создания потока
 app.get('/new-thread', async (req, res) => {
-  process.stdout.write('Создание нового потока...\n');
+  process.stdout.write('Создание нового потока...\n'); // Логируем начало
   try {
     const response = await axios.post(
       'https://api.openai.com/v1/threads',
@@ -21,10 +21,10 @@ app.get('/new-thread', async (req, res) => {
         },
       }
     );
-    process.stdout.write(`Новый thread_id создан: ${response.data.id}\n`);
+    process.stdout.write(`Новый thread_id создан: ${response.data.id}\n`); // Логируем успешный ответ
     res.json({ thread_id: response.data.id });
   } catch (err) {
-    process.stdout.write(`Ошибка при создании thread_id: ${err.message}\n`);
+    process.stdout.write(`Ошибка при создании thread_id: ${err.message}\n`); // Логируем ошибку
     res.status(500).json({ error: 'Не удалось создать thread_id' });
   }
 });
@@ -35,7 +35,7 @@ app.get('/ask', async (req, res) => {
   const threadId = req.query.thread_id;
 
   if (!threadId) {
-    process.stdout.write('Ошибка: отсутствует thread_id\n');
+    process.stdout.write('Ошибка: отсутствует thread_id\n'); // Логируем отсутствие thread_id
     res.status(400).json({ error: 'thread_id отсутствует' });
     return;
   }
@@ -44,7 +44,7 @@ app.get('/ask', async (req, res) => {
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
 
-  process.stdout.write(`Запрос к OpenAI с thread_id: ${threadId}, сообщение: ${userMessage}\n`);
+  process.stdout.write(`Запрос к OpenAI с thread_id: ${threadId}, сообщение: ${userMessage}\n`); // Логируем начало запроса
 
   try {
     const run = await axios.post(
@@ -68,99 +68,28 @@ app.get('/ask', async (req, res) => {
       }
     );
 
-    run.data.on('data', async (chunk) => {
+    run.data.on('data', (chunk) => {
       const lines = chunk.toString().split('\n');
-
       for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
-
-        const jsonStr = line.slice(6);
-        if (jsonStr === '[DONE]') {
-          res.write('data: [DONE]\n\n');
-          res.end();
-          process.stdout.write('Поток завершен\n');
-          return;
-        }
-
-        let data;
-        try {
-          data = JSON.parse(jsonStr);
-        } catch (e) {
-          continue;
-        }
-
-        // ✅ Новый способ: проверка на required_action
-        if (data.required_action?.submit_tool_outputs) {
-          const toolCall = data.required_action.submit_tool_outputs.tool_calls[0];
-          const run_id = data.id;
-          const args = JSON.parse(toolCall.function.arguments);
-          const { location, unit } = args;
-
-          process.stdout.write(`🌍 Обработка get_weather для: ${location} (${unit})\n`);
-
-          try {
-            const geo = await axios.get('https://nominatim.openstreetmap.org/search', {
-              params: {
-                q: location,
-                format: 'json',
-                limit: 1,
-              },
-            });
-
-            if (!geo.data.length) throw new Error('Город не найден');
-
-            const lat = geo.data[0].lat;
-            const lon = geo.data[0].lon;
-
-            const meteo = await axios.get('https://api.open-meteo.com/v1/forecast', {
-              params: {
-                latitude: lat,
-                longitude: lon,
-                current: 'temperature_2m',
-              },
-            });
-
-            const tempC = meteo.data.current.temperature_2m;
-            const temp = unit === 'f' ? (tempC * 9) / 5 + 32 : tempC;
-            const formatted = `${temp.toFixed(1)}°${unit === 'f' ? 'F' : 'C'}`;
-
-            await axios.post(
-              `https://api.openai.com/v1/threads/${threadId}/runs/${run_id}/submit_tool_outputs`,
-              {
-                tool_outputs: [
-                  {
-                    tool_call_id: toolCall.id,
-                    output: `The temperature in ${location} is ${formatted}`,
-                  },
-                ],
-              },
-              {
-                headers: {
-                  Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-                  'OpenAI-Beta': 'assistants=v2',
-                },
-              }
-            );
-
-            process.stdout.write(`✅ Температура отправлена: ${formatted}\n`);
-          } catch (err) {
-            process.stdout.write(`❌ Ошибка get_weather: ${err.message}\n`);
-            res.write(`data: {"error":"${err.message}"}\n\n`);
-            res.end();
-            return;
+        if (line.startsWith('data: ')) {
+          const jsonStr = line.slice(6);
+          if (jsonStr !== '[DONE]') {
+            res.write(`data: ${jsonStr}\n\n`);
+            process.stdout.write(`Отправлено: ${jsonStr}\n`); // Логируем отправку данных
           }
-        }
-
-        // Отображение обычных сообщений
-        if (data.delta?.content?.[0]?.text?.value) {
-          const content = data.delta.content[0].text.value;
-          res.write(`data: ${JSON.stringify({ content })}\n\n`);
-          process.stdout.write(`📤 ${content}\n`);
         }
       }
     });
+
+    run.data.on('end', () => {
+      res.write('data: [DONE]\n\n');
+      res.end();
+      process.stdout.write('Поток завершен\n'); // Логируем завершение потока
+    });
+
   } catch (error) {
-    process.stdout.write(`Ошибка в /ask: ${error.message}\n`);
+    process.stdout.write(`Ошибка в /ask: ${error.message}\n`); // Логируем ошибку
+    console.error('Ошибка в /ask:', error.message);
     res.write(`data: {"error":"${error.message}"}\n\n`);
     res.end();
   }
@@ -168,5 +97,5 @@ app.get('/ask', async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  process.stdout.write(`✅ SSE Proxy Server listening on port ${PORT}\n`);
+  process.stdout.write(`✅ SSE Proxy Server listening on port ${PORT}\n`); // Логируем запуск сервера
 });
