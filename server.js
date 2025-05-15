@@ -95,6 +95,70 @@ app.get('/ask', async (req, res) => {
   }
 });
 
+app.get('/get-weather', async (req, res) => {
+  const { tool_call_id, thread_id, run_id, location, unit } = req.query;
+
+  if (!tool_call_id || !thread_id || !run_id || !location || !unit) {
+    return res.status(400).json({ error: 'Missing required parameters' });
+  }
+
+  process.stdout.write(`🌦 Получен запрос get_weather для ${location} (${unit})\n`);
+
+  try {
+    // Подставим API Open-Meteo
+    const geoResp = await axios.get(`https://nominatim.openstreetmap.org/search`, {
+      params: { q: location, format: 'json', limit: 1 }
+    });
+
+    if (!geoResp.data.length) {
+      throw new Error('Город не найден');
+    }
+
+    const lat = geoResp.data[0].lat;
+    const lon = geoResp.data[0].lon;
+
+    const weatherResp = await axios.get(`https://api.open-meteo.com/v1/forecast`, {
+      params: {
+        latitude: lat,
+        longitude: lon,
+        current: 'temperature_2m',
+      }
+    });
+
+    const tempC = weatherResp.data.current.temperature_2m;
+    const result = unit === 'f' ? (tempC * 9) / 5 + 32 : tempC;
+
+    const formatted = unit === 'f' ? `${result.toFixed(1)}°F` : `${result.toFixed(1)}°C`;
+
+    process.stdout.write(`✅ Температура в ${location}: ${formatted}\n`);
+
+    // Отправка результата обратно в OpenAI
+    await axios.post(
+      `https://api.openai.com/v1/threads/${thread_id}/runs/${run_id}/submit_tool_outputs`,
+      {
+        tool_outputs: [
+          {
+            tool_call_id,
+            output: `The temperature in ${location} is ${formatted}`
+          }
+        ]
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          'OpenAI-Beta': 'assistants=v2',
+        }
+      }
+    );
+
+    res.json({ success: true });
+
+  } catch (error) {
+    process.stdout.write(`❌ Ошибка в /get-weather: ${error.message}\n`);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   process.stdout.write(`✅ SSE Proxy Server listening on port ${PORT}\n`); // Логируем запуск сервера
