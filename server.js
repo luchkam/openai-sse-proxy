@@ -7,7 +7,6 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Новый endpoint для создания потока
 app.get('/new-thread', async (req, res) => {
   process.stdout.write('Создание нового потока...\n');
   try {
@@ -29,7 +28,6 @@ app.get('/new-thread', async (req, res) => {
   }
 });
 
-// SSE endpoint для генерации и потоковой передачи ответа
 app.get('/ask', async (req, res) => {
   const userMessage = req.query.message;
   const threadId = req.query.thread_id;
@@ -70,11 +68,10 @@ app.get('/ask', async (req, res) => {
 
     run.data.on('data', async (chunk) => {
       const lines = chunk.toString().split('\n');
-
       for (const line of lines) {
         if (!line.startsWith('data: ')) continue;
-
         const jsonStr = line.slice(6);
+
         if (jsonStr === '[DONE]') {
           res.write('data: [DONE]\n\n');
           res.end();
@@ -89,12 +86,15 @@ app.get('/ask', async (req, res) => {
           continue;
         }
 
-        if (
-          data.event === 'thread.run.requires_action' &&
-          data.data?.required_action?.submit_tool_outputs
-        ) {
-          const toolCall = data.data.required_action.submit_tool_outputs.tool_calls[0];
-          const run_id = data.data.id;
+        if (data.type === 'message_delta') {
+          const content = data.delta?.content?.[0]?.text?.value;
+          if (content) {
+            res.write(`data: ${JSON.stringify({ content })}\n\n`);
+            process.stdout.write(`📤 ${content}\n`);
+          }
+        } else if (data.type === 'tool_calls') {
+          const toolCall = data.tool_calls?.[0];
+          const run_id = data.run_id || data.id;
           const args = JSON.parse(toolCall.function.arguments);
           const { location, unit } = args;
 
@@ -152,23 +152,8 @@ app.get('/ask', async (req, res) => {
             return;
           }
         }
-
-        if (data.event === 'thread.message.delta') {
-          const content = data.delta?.content?.[0]?.text?.value;
-          if (content) {
-            res.write(`data: ${JSON.stringify({ content })}\n\n`);
-            process.stdout.write(`📤 ${content}\n`);
-          }
-        }
-
-        if (data.event === 'thread.message' && data.data?.content?.length > 0) {
-          const fullText = data.data.content.map(c => c.text?.value).filter(Boolean).join(' ');
-          res.write(`data: ${JSON.stringify({ content: fullText })}\n\n`);
-          process.stdout.write(`📤 [final] ${fullText}\n`);
-        }
       }
     });
-
   } catch (error) {
     process.stdout.write(`Ошибка в /ask: ${error.message}\n`);
     res.write(`data: {"error":"${error.message}"}\n\n`);
