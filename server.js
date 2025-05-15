@@ -102,16 +102,14 @@ app.get('/ask', async (req, res) => {
             jsonStr.includes('"instructions":"') ||
             jsonStr.includes('"tool_calls":[') ||
             jsonStr.includes('"arguments":"{') ||
-            jsonStr.includes('"location') // иногда только часть JSON может быть
+            jsonStr.includes('"location')
           ) {
-            return; // ожидаемая ситуация — просто ждём следующий чанк
+            return;
           }
-          console.warn('⛔️ Ошибка парсинга JSON:', err.message);
-          console.warn('Строка:', jsonStr);
+          process.stdout.write(`⛔️ Ошибка парсинга JSON: ${err.message}\nСтрока: ${jsonStr}\n`);
           return;
         }
 
-        // Обработка tool_calls -> get_weather
         if (
           data.event === 'thread.run.requires_action' &&
           data.data?.required_action?.type === 'submit_tool_outputs'
@@ -125,7 +123,7 @@ app.get('/ask', async (req, res) => {
               try {
                 args = JSON.parse(call.function.arguments);
               } catch (err) {
-                console.warn('⚠️ Ошибка парсинга arguments:', err.message);
+                process.stdout.write(`⚠️ Ошибка парсинга arguments: ${err.message}\n`);
                 continue;
               }
 
@@ -137,8 +135,10 @@ app.get('/ask', async (req, res) => {
             }
           }
 
-          // Отправка результатов назад в OpenAI
           try {
+            process.stdout.write(`📡 submit_tool_outputs → run_id: ${data.data.id}, thread_id: ${threadId}\n`);
+            process.stdout.write(`📦 Outputs: ${JSON.stringify(outputs, null, 2)}\n`);
+
             await axios.post(
               `https://api.openai.com/v1/threads/${threadId}/runs/${data.data.id}/submit_tool_outputs`,
               { tool_outputs: outputs },
@@ -149,9 +149,38 @@ app.get('/ask', async (req, res) => {
                 },
               }
             );
+
+            process.stdout.write('✅ submit_tool_outputs успешно отправлен. Ожидаем продолжение ответа...\n');
+
+            const continued = await axios.get(
+              `https://api.openai.com/v1/threads/${threadId}/runs/${data.data.id}`,
+              {
+                headers: {
+                  Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+                  'OpenAI-Beta': 'assistants=v2',
+                },
+                responseType: 'stream',
+              }
+            );
+
+            continued.data.on('data', (chunk) => {
+              const msg = chunk.toString();
+              res.write(`data: ${msg}\n\n`);
+              process.stdout.write(`📤 Ответ после submit_tool_outputs: ${msg}\n`);
+            });
+
+            continued.data.on('end', () => {
+              res.write('data: [DONE]\n\n');
+              res.end();
+              process.stdout.write('✅ Поток после submit_tool_outputs завершён\n');
+            });
           } catch (err) {
-            console.error('❌ Ошибка отправки tool_outputs:', err.message);
+            process.stdout.write(`❌ Ошибка при submit_tool_outputs или продолжении: ${err.message}\n`);
+            res.write(`data: {"error":"${err.message}"}\n\n`);
+            res.end();
           }
+
+          return;
         }
 
         res.write(`data: ${jsonStr}\n\n`);
@@ -165,13 +194,12 @@ app.get('/ask', async (req, res) => {
       process.stdout.write('✅ Поток завершен\n');
     });
   } catch (error) {
-    console.error('❌ Ошибка в /ask:', error.message);
+    process.stdout.write(`❌ Ошибка в /ask: ${error.message}\n`);
     res.write(`data: {"error":"${error.message}"}\n\n`);
     res.end();
   }
 });
 
-// Запуск сервера
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   process.stdout.write(`✅ SSE Proxy Server listening on port ${PORT}\n`);
