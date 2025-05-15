@@ -89,12 +89,10 @@ app.get('/ask', async (req, res) => {
           continue;
         }
 
-        if (
-          data.event === 'thread.run.requires_action' &&
-          data.data?.required_action?.submit_tool_outputs
-        ) {
-          const toolCall = data.data.required_action.submit_tool_outputs.tool_calls[0];
-          const run_id = data.data.id;
+        // ✅ Новый способ: проверка на required_action
+        if (data.required_action?.submit_tool_outputs) {
+          const toolCall = data.required_action.submit_tool_outputs.tool_calls[0];
+          const run_id = data.id;
           const args = JSON.parse(toolCall.function.arguments);
           const { location, unit } = args;
 
@@ -153,12 +151,11 @@ app.get('/ask', async (req, res) => {
           }
         }
 
-        if (data.event === 'thread.message.delta') {
-          const content = data.delta?.content?.[0]?.text?.value;
-          if (content) {
-            res.write(`data: ${JSON.stringify({ content })}\n\n`);
-            process.stdout.write(`📤 ${content}\n`);
-          }
+        // Отображение обычных сообщений
+        if (data.delta?.content?.[0]?.text?.value) {
+          const content = data.delta.content[0].text.value;
+          res.write(`data: ${JSON.stringify({ content })}\n\n`);
+          process.stdout.write(`📤 ${content}\n`);
         }
       }
     });
