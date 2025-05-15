@@ -63,19 +63,18 @@ app.get('/ask', async (req, res) => {
   const userMessage = req.query.message;
   const threadId = req.query.thread_id;
 
-  if (!threadId) {
-    res.status(400).json({ error: 'thread_id отсутствует' });
-    return;
+  if (!threadId || !userMessage) {
+    return res.status(400).json({ error: 'Отсутствует message или thread_id' });
   }
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
 
-  process.stdout.write(`\nЗапрос к OpenAI с thread_id: ${threadId}, сообщение: ${userMessage}\n`);
+  process.stdout.write(`📨 Запрос: ${userMessage}, thread_id: ${threadId}\n`);
 
   try {
-    const run = await axios.post(
+    const response = await axios.post(
       `https://api.openai.com/v1/threads/${threadId}/runs`,
       {
         assistant_id: process.env.ASSISTANT_ID,
@@ -98,36 +97,40 @@ app.get('/ask', async (req, res) => {
 
     let buffer = '';
 
-    run.data.on('data', async (chunk) => {
+    response.data.on('data', async (chunk) => {
       const lines = chunk.toString().split('\n');
+
       for (const line of lines) {
         if (line.startsWith('data: ')) {
-          const jsonStr = line.slice(6);
+          const json = line.slice(6);
 
-          if (jsonStr === '[DONE]') {
-            res.write('data: [DONE]\n\n');
+          if (json === '[DONE]') {
+            res.write(`data: [DONE]\n\n`);
             res.end();
-            process.stdout.write('Поток завершен\n');
             return;
           }
 
-          buffer += jsonStr;
-
           try {
-            const parsed = JSON.parse(buffer);
-            buffer = ''; // очищаем после удачного парса
+            const parsed = JSON.parse(json);
 
-            // 🔧 Вызов функции
+            // Обработка обычного текста
+            if (parsed?.delta?.content) {
+              const text = parsed.delta.content[0]?.text?.value;
+              if (text) {
+                res.write(`data: ${JSON.stringify({ text })}\n\n`);
+              }
+            }
+
+            // Обработка вызова функции
             if (parsed?.type === 'function_call') {
               const tool_call_id = parsed.call_id || parsed.id;
+              const run_id = parsed.run_id;
               const args = JSON.parse(parsed.arguments);
-              const { location, unit } = args;
+              const output = await getWeather(args.location, args.unit);
 
-              process.stdout.write(`🛠 Вызов get_weather: ${JSON.stringify(args)}\n`);
-              const output = await getWeather(location, unit);
-
+              // Отправка результата функции обратно в OpenAI
               await axios.post(
-                `https://api.openai.com/v1/threads/${threadId}/runs/${parsed.run_id}/submit_tool_outputs`,
+                `https://api.openai.com/v1/threads/${threadId}/runs/${run_id}/submit_tool_outputs`,
                 {
                   tool_outputs: [
                     {
@@ -144,33 +147,24 @@ app.get('/ask', async (req, res) => {
                 }
               );
 
-              process.stdout.write(`✅ Ответ отправлен: ${output}\n`);
-            }
-
-            // 📤 Обычный текст
-            if (parsed?.delta?.content) {
-              const text = parsed.delta.content[0]?.text?.value || '';
-              res.write(`data: ${JSON.stringify({ text })}\n\n`);
-              process.stdout.write(`Отправлено: ${text}\n`);
+              process.stdout.write(`✅ submit_tool_outputs отправлен: ${output}\n`);
             }
           } catch (err) {
-            // Пропускаем незавершённые JSON куски
-            process.stdout.write(`⚠️ Пропущен chunk (ожидаем продолжения): ${jsonStr.slice(0, 100)}...\n`);
+            process.stdout.write(`⚠️ Некорректный JSON (будет продолжен): ${json.slice(0, 100)}...\n`);
           }
         }
       }
     });
 
-    run.data.on('end', () => {
-      res.write('data: [DONE]\n\n');
+    response.data.on('end', () => {
+      res.write(`data: [DONE]\n\n`);
       res.end();
-      process.stdout.write('⛔️ Поток завершён (END)\n');
+      process.stdout.write(`⛔️ Поток завершён\n`);
     });
-
   } catch (error) {
-    res.write(`data: {"error":"${error.message}"}\n\n`);
-    res.end();
     process.stdout.write(`❌ Ошибка в /ask: ${error.message}\n`);
+    res.write(`data: {"error": "${error.message}"}\n\n`);
+    res.end();
   }
 });
 
