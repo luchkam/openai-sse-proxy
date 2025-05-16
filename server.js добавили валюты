@@ -55,6 +55,23 @@ const getWeather = async (location, unit) => {
   }
 };
 
+// Функция получения курса валют
+const getExchangeRate = async (from, to) => {
+  try {
+    const res = await axios.get(`https://api.exchangerate.host/convert?from=${from}&to=${to}`);
+    const rate = res.data.result;
+    return {
+      from,
+      to,
+      rate,
+      message: `1 ${from} = ${rate} ${to}`
+    };
+  } catch (error) {
+    process.stdout.write(`Ошибка курса валют: ${error.message}\n`);
+    return { error: "Не удалось получить курс валют. Проверьте коды валют." };
+  }
+};
+
 // SSE endpoint
 app.get('/ask', async (req, res) => {
   const userMessage = req.query.message;
@@ -122,6 +139,21 @@ app.get('/ask', async (req, res) => {
             outputs.push({
               tool_call_id: call.id,
               output: JSON.stringify(weather),
+            });
+          }
+          if (call.function.name === 'get_exchange_rate') {
+            let args;
+            try {
+              args = JSON.parse(call.function.arguments);
+            } catch (err) {
+              process.stdout.write(`⚠️ Ошибка парсинга arguments: ${err.message}\n`);
+              continue;
+            }
+
+            const rate = await getExchangeRate(args.from, args.to);
+            outputs.push({
+              tool_call_id: call.id,
+              output: JSON.stringify(rate),
             });
           }
         }
