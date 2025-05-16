@@ -164,12 +164,40 @@ app.get('/ask', async (req, res) => {
       res.end();
       process.stdout.write('✅ Поток завершен\n');
     });
+
+    // Автоматически проверим, есть ли незавершённые действия
+    runAndCheckForActions(threadId);
   } catch (error) {
     process.stdout.write(`❌ Ошибка в /ask: ${error.message}\n`);
     res.write(`data: {"error":"${error.message}"}\n\n`);
     res.end();
   }
 });
+
+// Фоновая проверка незавершённых действий
+async function runAndCheckForActions(threadId) {
+  try {
+    const runsResponse = await axios.get(
+      `https://api.openai.com/v1/threads/${threadId}/runs`,
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          'OpenAI-Beta': 'assistants=v2',
+        },
+      }
+    );
+
+    const runs = runsResponse.data.data;
+    for (const run of runs) {
+      process.stdout.write(`🔍 Run ${run.id} - status: ${run.status}\n`);
+      if (run.status === 'requires_action') {
+        process.stdout.write(`⚙️ Этот run требует submit_tool_outputs: ${JSON.stringify(run.required_action)}\n`);
+      }
+    }
+  } catch (err) {
+    process.stdout.write(`❌ Ошибка проверки runs: ${err.message}\n`);
+  }
+}
 
 // Запуск сервера
 const PORT = process.env.PORT || 3000;
