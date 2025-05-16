@@ -63,10 +63,6 @@ app.get('/ask', async (req, res) => {
     return res.status(400).json({ error: 'thread_id отсутствует' });
   }
 
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-
   process.stdout.write(`📨 Запрос к OpenAI с thread_id: ${threadId}, сообщение: ${userMessage}\n`);
 
   try {
@@ -86,11 +82,11 @@ app.get('/ask', async (req, res) => {
 
     const runId = runResponse.data.id;
 
-    // Ожидаем завершения выполнения run
-    let status = 'queued';
-    while (status === 'queued' || status === 'in_progress') {
+    // Ждем завершения выполнения run
+    let completed = false;
+    while (!completed) {
       await new Promise(resolve => setTimeout(resolve, 1000));
-      const checkRun = await axios.get(
+      const statusResponse = await axios.get(
         `https://api.openai.com/v1/threads/${threadId}/runs/${runId}`,
         {
           headers: {
@@ -99,10 +95,13 @@ app.get('/ask', async (req, res) => {
           },
         }
       );
-      status = checkRun.data.status;
 
-      if (status === 'requires_action') {
-        const toolCalls = checkRun.data.required_action.submit_tool_outputs.tool_calls;
+      const status = statusResponse.data.status;
+      if (status === 'completed') {
+        completed = true;
+        break;
+      } else if (status === 'requires_action') {
+        const toolCalls = statusResponse.data.required_action.submit_tool_outputs.tool_calls;
         const outputs = [];
 
         for (const call of toolCalls) {
@@ -123,26 +122,22 @@ app.get('/ask', async (req, res) => {
           }
         }
 
-        try {
-          process.stdout.write(`📤 Отправка tool_outputs: ${JSON.stringify(outputs)}\n`);
-          await axios.post(
-            `https://api.openai.com/v1/threads/${threadId}/runs/${runId}/submit_tool_outputs`,
-            { tool_outputs: outputs },
-            {
-              headers: {
-                Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-                'OpenAI-Beta': 'assistants=v2',
-              },
-            }
-          );
-          process.stdout.write('✅ submit_tool_outputs успешно отправлены\n');
-        } catch (err) {
-          process.stdout.write(`❌ Ошибка отправки tool_outputs: ${err.message}\n`);
-        }
+        await axios.post(
+          `https://api.openai.com/v1/threads/${threadId}/runs/${runId}/submit_tool_outputs`,
+          { tool_outputs: outputs },
+          {
+            headers: {
+              Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+              'OpenAI-Beta': 'assistants=v2',
+            },
+          }
+        );
+
+        process.stdout.write('✅ submit_tool_outputs успешно отправлены\n');
       }
     }
 
-    // Получаем финальное сообщение после завершения
+    // Получаем последнее сообщение
     const messagesResponse = await axios.get(
       `https://api.openai.com/v1/threads/${threadId}/messages`,
       {
@@ -153,46 +148,24 @@ app.get('/ask', async (req, res) => {
       }
     );
 
-    const lastMessage = messagesResponse.data.data.find(msg => msg.role === 'assistant');
-    if (lastMessage) {
-      res.write(`data: ${JSON.stringify(lastMessage)}\n\n`);
-      process.stdout.write(`📤 Ответ ассистента: ${JSON.stringify(lastMessage)}\n`);
-    }
-
+    const lastMessage = messagesResponse.data.data.find(m => m.role === 'assistant');
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.write(`data: ${JSON.stringify(lastMessage)}\n\n`);
     res.write('data: [DONE]\n\n');
     res.end();
+    process.stdout.write(`📤 Ответ ассистента: ${JSON.stringify(lastMessage)}\n`);
     process.stdout.write('✅ Поток завершен\n');
+
   } catch (error) {
     process.stdout.write(`❌ Ошибка в /ask: ${error.message}\n`);
+    res.setHeader('Content-Type', 'text/event-stream');
     res.write(`data: {"error":"${error.message}"}\n\n`);
+    res.write('data: [DONE]\n\n');
     res.end();
   }
 });
-
-// Фоновая проверка незавершённых действий
-async function runAndCheckForActions(threadId) {
-  try {
-    const runsResponse = await axios.get(
-      `https://api.openai.com/v1/threads/${threadId}/runs`,
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-          'OpenAI-Beta': 'assistants=v2',
-        },
-      }
-    );
-
-    const runs = runsResponse.data.data;
-    for (const run of runs) {
-      process.stdout.write(`🔍 Run ${run.id} - status: ${run.status}\n`);
-      if (run.status === 'requires_action') {
-        process.stdout.write(`⚙️ Этот run требует submit_tool_outputs: ${JSON.stringify(run.required_action)}\n`);
-      }
-    }
-  } catch (err) {
-    process.stdout.write(`❌ Ошибка проверки runs: ${err.message}\n`);
-  }
-}
 
 // Запуск сервера
 const PORT = process.env.PORT || 3000;
