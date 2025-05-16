@@ -35,6 +35,8 @@ const getWeather = async (location, unit) => {
     const geoResponse = await axios.get(
       `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(location)}&count=1`
     );
+    process.stdout.write(`🌍 Геоданные: ${JSON.stringify(geoResponse.data)}\n`);
+
     const { latitude, longitude } = geoResponse.data.results[0];
 
     const weatherResponse = await axios.get(
@@ -63,13 +65,18 @@ app.get('/ask', async (req, res) => {
     return res.status(400).json({ error: 'thread_id отсутствует' });
   }
 
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+
   process.stdout.write(`📨 Запрос к OpenAI с thread_id: ${threadId}, сообщение: ${userMessage}\n`);
 
   try {
-    const runResponse = await axios.post(
+    const run = await axios.post(
       `https://api.openai.com/v1/threads/${threadId}/runs`,
       {
         assistant_id: process.env.ASSISTANT_ID,
+        stream: false,
         additional_messages: [{ role: 'user', content: userMessage }],
       },
       {
@@ -80,13 +87,11 @@ app.get('/ask', async (req, res) => {
       }
     );
 
-    const runId = runResponse.data.id;
+    const runId = run.data.id;
 
-    // Ждем завершения выполнения run
     let completed = false;
     while (!completed) {
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      const statusResponse = await axios.get(
+      const statusRes = await axios.get(
         `https://api.openai.com/v1/threads/${threadId}/runs/${runId}`,
         {
           headers: {
@@ -96,12 +101,11 @@ app.get('/ask', async (req, res) => {
         }
       );
 
-      const status = statusResponse.data.status;
-      if (status === 'completed') {
+      if (statusRes.data.status === 'completed') {
         completed = true;
         break;
-      } else if (status === 'requires_action') {
-        const toolCalls = statusResponse.data.required_action.submit_tool_outputs.tool_calls;
+      } else if (statusRes.data.status === 'requires_action') {
+        const toolCalls = statusRes.data.required_action.submit_tool_outputs.tool_calls;
         const outputs = [];
 
         for (const call of toolCalls) {
@@ -122,23 +126,28 @@ app.get('/ask', async (req, res) => {
           }
         }
 
-        await axios.post(
-          `https://api.openai.com/v1/threads/${threadId}/runs/${runId}/submit_tool_outputs`,
-          { tool_outputs: outputs },
-          {
-            headers: {
-              Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-              'OpenAI-Beta': 'assistants=v2',
-            },
-          }
-        );
-
-        process.stdout.write('✅ submit_tool_outputs успешно отправлены\n');
+        try {
+          process.stdout.write(`📤 Отправка tool_outputs: ${JSON.stringify(outputs)}\n`);
+          await axios.post(
+            `https://api.openai.com/v1/threads/${threadId}/runs/${runId}/submit_tool_outputs`,
+            { tool_outputs: outputs },
+            {
+              headers: {
+                Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+                'OpenAI-Beta': 'assistants=v2',
+              },
+            }
+          );
+          process.stdout.write('✅ submit_tool_outputs успешно отправлены\n');
+        } catch (err) {
+          process.stdout.write(`❌ Ошибка отправки tool_outputs: ${err.message}\n`);
+        }
+      } else {
+        await new Promise((r) => setTimeout(r, 1000));
       }
     }
 
-    // Получаем последнее сообщение
-    const messagesResponse = await axios.get(
+    const messagesRes = await axios.get(
       `https://api.openai.com/v1/threads/${threadId}/messages`,
       {
         headers: {
@@ -148,21 +157,15 @@ app.get('/ask', async (req, res) => {
       }
     );
 
-    const lastMessage = messagesResponse.data.data.find(m => m.role === 'assistant');
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    res.write(`data: ${JSON.stringify(lastMessage)}\n\n`);
+    const last = messagesRes.data.data.find((m) => m.role === 'assistant');
+    process.stdout.write(`📤 Ответ ассистента: ${JSON.stringify(last)}\n`);
+    res.write(`data: ${JSON.stringify(last)}\n\n`);
     res.write('data: [DONE]\n\n');
     res.end();
-    process.stdout.write(`📤 Ответ ассистента: ${JSON.stringify(lastMessage)}\n`);
     process.stdout.write('✅ Поток завершен\n');
-
   } catch (error) {
     process.stdout.write(`❌ Ошибка в /ask: ${error.message}\n`);
-    res.setHeader('Content-Type', 'text/event-stream');
     res.write(`data: {"error":"${error.message}"}\n\n`);
-    res.write('data: [DONE]\n\n');
     res.end();
   }
 });
