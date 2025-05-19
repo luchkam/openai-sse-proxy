@@ -58,27 +58,26 @@ const getWeather = async (location, unit) => {
 // Функция получения курса валют
 const getExchangeRate = async (from, to) => {
   try {
-    const response = await axios.get(
-      `https://api.apilayer.com/exchangerates_data/convert?from=${from}&to=${to}&amount=1`,
-      {
-        headers: {
-          apikey: process.env.EXCHANGE_API_KEY,
-        },
+    const response = await axios.get('https://api.exchangerate.host/convert', {
+      params: {
+        access_key: process.env.EXCHANGE_API_KEY,
+        from: from,
+        to: to
       }
-    );
+    });
 
     const rate = response.data.result;
     return {
       from,
       to,
-      message: `1 ${from} = ${rate} ${to}`,
+      message: `1 ${from} = ${rate} ${to}`
     };
   } catch (error) {
     process.stdout.write(`Ошибка курса валют: ${error.message}\n`);
     return {
       from,
       to,
-      message: `1 ${from} = undefined ${to}`,
+      message: `1 ${from} = undefined ${to}`
     };
   }
 };
@@ -151,9 +150,7 @@ app.get('/ask', async (req, res) => {
               tool_call_id: call.id,
               output: JSON.stringify(weather),
             });
-          }
-
-          if (call.function.name === 'get_exchange_rate') {
+          } else if (call.function.name === 'get_exchange_rate') {
             let args;
             try {
               args = JSON.parse(call.function.arguments);
