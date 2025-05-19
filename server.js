@@ -29,6 +29,33 @@ app.get('/new-thread', async (req, res) => {
   }
 });
 
+// Функция получения курса валют
+const getExchangeRate = async (from, to, amount = 1) => {
+  try {
+    const response = await axios.get('https://api.exchangerate.host/convert', {
+      params: {
+        access_key: process.env.EXCHANGE_API_KEY,
+        from,
+        to,
+        amount
+      }
+    });
+
+    if (response.data && response.data.result) {
+      return {
+        from,
+        to,
+        message: `1 ${from} = ${response.data.result / amount} ${to}`,
+      };
+    } else {
+      throw new Error('Некорректный ответ от API');
+    }
+  } catch (error) {
+    process.stdout.write(`Ошибка курса валют: ${error.message}\n`);
+    return { from, to, message: `1 ${from} = undefined ${to}` };
+  }
+};
+
 // Функция получения погоды
 const getWeather = async (location, unit) => {
   try {
@@ -52,33 +79,6 @@ const getWeather = async (location, unit) => {
   } catch (error) {
     process.stdout.write(`Ошибка погоды: ${error.message}\n`);
     return { error: "Не удалось получить погоду. Проверьте название города." };
-  }
-};
-
-// Функция получения курса валют
-const getExchangeRate = async (from, to) => {
-  try {
-    const response = await axios.get('https://api.exchangerate.host/convert', {
-      params: {
-        access_key: process.env.EXCHANGE_API_KEY,
-        from: from,
-        to: to
-      }
-    });
-
-    const rate = response.data.result;
-    return {
-      from,
-      to,
-      message: `1 ${from} = ${rate} ${to}`
-    };
-  } catch (error) {
-    process.stdout.write(`Ошибка курса валют: ${error.message}\n`);
-    return {
-      from,
-      to,
-      message: `1 ${from} = undefined ${to}`
-    };
   }
 };
 
@@ -150,7 +150,9 @@ app.get('/ask', async (req, res) => {
               tool_call_id: call.id,
               output: JSON.stringify(weather),
             });
-          } else if (call.function.name === 'get_exchange_rate') {
+          }
+
+          if (call.function.name === 'get_exchange_rate') {
             let args;
             try {
               args = JSON.parse(call.function.arguments);
@@ -159,7 +161,8 @@ app.get('/ask', async (req, res) => {
               continue;
             }
 
-            const rate = await getExchangeRate(args.from, args.to);
+            const amount = args.amount || 1;
+            const rate = await getExchangeRate(args.from, args.to, amount);
             outputs.push({
               tool_call_id: call.id,
               output: JSON.stringify(rate),
