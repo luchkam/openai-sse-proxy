@@ -110,7 +110,7 @@ const getFlights = async (args) => {
       destination,
       depart_date: date,
       return_date: returnDate,
-      currency: 'KZT',
+      currency: 'RUB',
       one_way: !returnDate,
       market: 'ru',
       token: token
