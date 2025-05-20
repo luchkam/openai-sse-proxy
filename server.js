@@ -83,38 +83,59 @@ const getWeather = async (location, unit) => {
 };
 
 // Функция получения авиабилетов
-const getFlights = async (from, to, date, return_date, adults) => {
+const getFlights = async (args) => {
   try {
-    const response = await axios.get('https://api.travelpayouts.com/aviasales/v3/prices_for_dates', {
-      params: {
-        origin: from,
-        destination: to,
-        departure_at: date,
-        return_at: return_date,
-        currency: 'KZT',
-        limit: 3,
-        token: process.env.TRAVELPAYOUTS_API_KEY
-      }
-    });
+    process.stdout.write(`🧾 Аргументы запроса на билеты: ${JSON.stringify(args)}\n`);
 
-    const tickets = response.data.data || [];
+    const from = args.from?.replace(/\s+/g, '').toLowerCase();
+    const to = args.to?.replace(/\s+/g, '').toLowerCase();
+    const date = args.date;
+    const returnDate = args.return_date;
+    const passengers = args.passengers || 1;
 
-    if (!tickets.length) {
-      return { error: "Билеты не найдены." };
+    process.stdout.write(`✏️ from: ${from}, to: ${to}\n`);
+
+    const iataFrom = iataData.find(city => city.name_translations?.ru?.replace(/\s+/g, '').toLowerCase() === from)?.code;
+    const iataTo = iataData.find(city => city.name_translations?.ru?.replace(/\s+/g, '').toLowerCase() === to)?.code;
+
+    process.stdout.write(`🛬 Найденный IATA-код: from=${iataFrom}, to=${iataTo}\n`);
+
+    const origin = iataFrom;
+    const destination = iataTo;
+    const token = process.env.TRAVELPAYOUTS_API_KEY;
+
+    const params = {
+      origin,
+      destination,
+      depart_date: date,
+      return_date: returnDate,
+      currency: 'KZT',
+      token: token
+    };
+
+    process.stdout.write(`📡 Запрос в Travelpayouts: ${JSON.stringify(params)}\n`);
+    process.stdout.write(`🔍 Готов к отправке запроса в Travelpayouts\n`);
+
+    const response = await axios.get('https://api.travelpayouts.com/v1/prices/cheap', { params });
+
+    const tickets = response.data?.data?.[destination]?.[date];
+
+    if (!tickets) {
+      throw new Error('Нет билетов');
     }
 
-    const results = tickets.map((ticket) => {
-      const link = `https://aviasales.kz/search/${from}${ticket.depart_date.replace(/-/g, '')}${to}1`;
-      return {
-        price: ticket.price,
+    const result = Object.values(tickets)
+      .sort((a, b) => a.value - b.value)
+      .slice(0, 3)
+      .map(ticket => ({
+        price: ticket.value,
         airline: ticket.airline,
-        departure: ticket.departure_at,
-        return: ticket.return_at,
-        link
-      };
-    });
+        flight_number: ticket.flight_number,
+        departure_at: ticket.departure_at,
+        link: `https://aviasales.kz/search/${origin}${date.replace(/-/g, '')}${destination}1`
+      }));
 
-    return { results };
+    return result;
   } catch (error) {
     process.stdout.write(`Ошибка поиска авиабилетов: ${error.message}\n`);
     return { error: "Не удалось получить данные по авиабилетам." };
@@ -208,7 +229,7 @@ app.get('/ask', async (req, res) => {
             });
           }
 
-          if (call.function.name === 'search_flights') {
+          if (call.function.name === 'get_flights') {
             let args;
             try {
               args = JSON.parse(call.function.arguments);
@@ -217,10 +238,10 @@ app.get('/ask', async (req, res) => {
               continue;
             }
 
-            const result = await getFlights(args.from, args.to, args.date, args.return_date, args.adults);
+            const flights = await getFlights(args);
             outputs.push({
               tool_call_id: call.id,
-              output: JSON.stringify(result),
+              output: JSON.stringify(flights),
             });
           }
         }
