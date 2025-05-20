@@ -222,7 +222,7 @@ app.get('/ask', async (req, res) => {
               continue;
             }
 
-            const flights = await searchFlights(args.origin, args.destination, args.date);
+            const flights = await searchFlights(args.origin, args.destination, args.depart_date);
             outputs.push({
               tool_call_id: call.id,
               output: JSON.stringify(flights),
