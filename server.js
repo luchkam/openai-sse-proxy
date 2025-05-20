@@ -85,6 +85,15 @@ const getWeather = async (location, unit) => {
 // Функция поиска авиабилетов
 const searchFlights = async (origin, destination, date) => {
   try {
+    process.stdout.write(`📡 Отправляем запрос в Travelpayouts с параметрами: ${JSON.stringify({
+  origin,
+  destination,
+  departure_at: date,
+  one_way: true,
+  currency: 'KZT',
+  market: 'kz',
+  limit: 3
+})}\n`);
     const response = await axios.get('https://api.travelpayouts.com/aviasales/v3/prices_for_dates', {
       params: {
   origin,
@@ -97,6 +106,8 @@ const searchFlights = async (origin, destination, date) => {
   token: process.env.TRAVELPAYOUTS_API_KEY
 }
     });
+
+    process.stdout.write(`📥 Ответ от Travelpayouts: ${JSON.stringify(response.data)}\n`);
 
     const tickets = response.data.data.slice(0, 3).map(ticket => ({
       price: ticket.price,
@@ -205,6 +216,7 @@ app.get('/ask', async (req, res) => {
             let args;
             try {
               args = JSON.parse(call.function.arguments);
+              process.stdout.write(`🧾 Аргументы от ассистента: ${JSON.stringify(args)}\n`);
             } catch (err) {
               process.stdout.write(`⚠️ Ошибка парсинга arguments: ${err.message}\n`);
               continue;
