@@ -193,6 +193,7 @@ app.get('/ask', async (req, res) => {
         break;
       } else if (statusRes.data.status === 'requires_action') {
         const toolCalls = statusRes.data.required_action.submit_tool_outputs.tool_calls;
+        process.stdout.write(`📦 Tool calls получены: ${JSON.stringify(toolCalls)}\n`);
         const outputs = [];
 
         for (const call of toolCalls) {
