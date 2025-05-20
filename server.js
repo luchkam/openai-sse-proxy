@@ -83,44 +83,38 @@ const getWeather = async (location, unit) => {
 };
 
 // Функция получения авиабилетов
-const getFlights = async (from, to, date, adults = 1) => {
+const getFlights = async (from, to, date, return_date, adults) => {
   try {
-    process.stdout.write(`✈️ Поиск билетов: from=${from}, to=${to}, date=${date}, adults=${adults}\n`);
     const response = await axios.get('https://api.travelpayouts.com/aviasales/v3/prices_for_dates', {
       params: {
         origin: from,
         destination: to,
         departure_at: date,
-        return_at: '',
+        return_at: return_date,
         currency: 'KZT',
-        sorting: 'price',
-        direct: false,
         limit: 3,
         token: process.env.TRAVELPAYOUTS_API_KEY
       }
     });
 
-    const data = response.data;
-    process.stdout.write(`📦 Данные от Travelpayouts: ${JSON.stringify(data)}\n`);
+    const tickets = response.data.data || [];
 
-    if (!data || !data.data || !Array.isArray(data.data)) {
-      throw new Error('Неверный формат данных от API');
+    if (!tickets.length) {
+      return { error: "Билеты не найдены." };
     }
 
-    const results = data.data.map(flight => {
+    const results = tickets.map((ticket) => {
+      const link = `https://aviasales.kz/search/${from}${ticket.depart_date.replace(/-/g, '')}${to}1`;
       return {
-        airline: flight.airline,
-        flight_number: flight.flight_number,
-        price: flight.price,
-        departure_at: flight.departure_at,
-        return_at: flight.return_at,
-        transfers: flight.transfers,
-        duration: flight.duration,
-        link: `https://aviasales.kz/search/${from}${date.replace(/-/g, '').slice(2)}${to}1` // примерная ссылка
+        price: ticket.price,
+        airline: ticket.airline,
+        departure: ticket.departure_at,
+        return: ticket.return_at,
+        link
       };
     });
 
-    return results;
+    return { results };
   } catch (error) {
     process.stdout.write(`Ошибка поиска авиабилетов: ${error.message}\n`);
     return { error: "Не удалось получить данные по авиабилетам." };
@@ -214,7 +208,7 @@ app.get('/ask', async (req, res) => {
             });
           }
 
-          if (call.function.name === 'get_flights') {
+          if (call.function.name === 'search_flights') {
             let args;
             try {
               args = JSON.parse(call.function.arguments);
@@ -223,10 +217,10 @@ app.get('/ask', async (req, res) => {
               continue;
             }
 
-            const flights = await getFlights(args.from, args.to, args.date, args.adults);
+            const result = await getFlights(args.from, args.to, args.date, args.return_date, args.adults);
             outputs.push({
               tool_call_id: call.id,
-              output: JSON.stringify(flights),
+              output: JSON.stringify(result),
             });
           }
         }
