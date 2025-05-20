@@ -87,12 +87,15 @@ const searchFlights = async (origin, destination, date) => {
   try {
     const response = await axios.get('https://api.travelpayouts.com/aviasales/v3/prices_for_dates', {
       params: {
-        origin,
-        destination,
-        departure_at: date,
-        currency: 'KZT',
-        token: process.env.TRAVELPAYOUTS_API_KEY
-      }
+  origin,
+  destination,
+  departure_at: date,
+  one_way: true,
+  currency: 'KZT',
+  market: 'kz',
+  limit: 3,
+  token: process.env.TRAVELPAYOUTS_API_KEY
+}
     });
 
     const tickets = response.data.data.slice(0, 3).map(ticket => ({
