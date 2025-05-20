@@ -82,6 +82,35 @@ const getWeather = async (location, unit) => {
   }
 };
 
+// Функция поиска авиабилетов
+const searchFlights = async (origin, destination, date) => {
+  try {
+    const response = await axios.get('https://api.travelpayouts.com/aviasales/v3/prices_for_dates', {
+      params: {
+        origin,
+        destination,
+        departure_at: date,
+        currency: 'KZT',
+        token: process.env.TRAVELPAYOUTS_API_KEY
+      }
+    });
+
+    const tickets = response.data.data.slice(0, 3).map(ticket => ({
+      price: ticket.price,
+      airline: ticket.airline,
+      departure_at: ticket.departure_at,
+      return_at: ticket.return_at,
+      transfers: ticket.transfers,
+      link: `https://aviasales.kz/search/${origin}${destination}${date.replace(/-/g, '')}1` // базовая ссылка
+    }));
+
+    return { tickets };
+  } catch (error) {
+    process.stdout.write(`Ошибка поиска авиабилетов: ${error.message}\n`);
+    return { error: 'Не удалось получить данные по авиабилетам.' };
+  }
+};
+
 // SSE endpoint
 app.get('/ask', async (req, res) => {
   const userMessage = req.query.message;
@@ -166,6 +195,22 @@ app.get('/ask', async (req, res) => {
             outputs.push({
               tool_call_id: call.id,
               output: JSON.stringify(rate),
+            });
+          }
+
+          if (call.function.name === 'search_flights') {
+            let args;
+            try {
+              args = JSON.parse(call.function.arguments);
+            } catch (err) {
+              process.stdout.write(`⚠️ Ошибка парсинга arguments: ${err.message}\n`);
+              continue;
+            }
+
+            const flights = await searchFlights(args.origin, args.destination, args.date);
+            outputs.push({
+              tool_call_id: call.id,
+              output: JSON.stringify(flights),
             });
           }
         }
