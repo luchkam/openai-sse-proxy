@@ -82,70 +82,32 @@ const getWeather = async (location, unit) => {
   }
 };
 
-// Функция получения авиабилетов
-const getFlights = async (args) => {
+// Функция поиска авиабилетов
+const searchFlights = async (origin, destination, date) => {
   try {
-    process.stdout.write(`🧾 Аргументы запроса на билеты: ${JSON.stringify(args)}\n`);
+    const response = await axios.get('https://api.travelpayouts.com/aviasales/v3/prices_for_dates', {
+      params: {
+        origin,
+        destination,
+        departure_at: date,
+        currency: 'KZT',
+        token: process.env.TRAVELPAYOUTS_API_KEY
+      }
+    });
 
-    const from = args.from?.replace(/\s+/g, '').toLowerCase();
-    const to = args.to?.replace(/\s+/g, '').toLowerCase();
-    const date = args.date;
-    const returnDate = args.return_date;
-    const passengers = args.passengers || 1;
+    const tickets = response.data.data.slice(0, 3).map(ticket => ({
+      price: ticket.price,
+      airline: ticket.airline,
+      departure_at: ticket.departure_at,
+      return_at: ticket.return_at,
+      transfers: ticket.transfers,
+      link: `https://aviasales.kz/search/${origin}${destination}${date.replace(/-/g, '')}1` // базовая ссылка
+    }));
 
-    process.stdout.write(`✏️ from: ${from}, to: ${to}\n`);
-
-    const iataFrom = iataData.find(city => city.name_translations?.ru?.replace(/\s+/g, '').toLowerCase() === from)?.code;
-    const iataTo = iataData.find(city => city.name_translations?.ru?.replace(/\s+/g, '').toLowerCase() === to)?.code;
-
-    process.stdout.write(`🛬 Найденный IATA-код: from=${iataFrom}, to=${iataTo}\n`);
-
-    const origin = iataFrom;
-    const destination = iataTo;
-    const token = process.env.TRAVELPAYOUTS_API_KEY;
-
-
-    const params = {
-      origin,
-      destination,
-      depart_date: date,
-      return_date: returnDate,
-      currency: 'RUB',
-      one_way: !returnDate,
-      market: 'ru',
-      token: token
-   };
-
-    process.stdout.write(`📡 Запрос в Travelpayouts: ${JSON.stringify(params)}\n`);
-    process.stdout.write(`🔍 Готов к отправке запроса в Travelpayouts\n`);
-
-    const response = await axios.get('https://api.travelpayouts.com/aviasales/v3/prices_for_dates', { params });
-    process.stdout.write(`📬 Ответ от Travelpayouts: ${JSON.stringify(response.data)}\n`);
-
-    const apiData = response.data;
-
-    if (!apiData.success || !Array.isArray(apiData.data) || apiData.data.length === 0) {
-     throw new Error('Ответ от API неуспешен или билеты не найдены');
-   }
-
-    const tickets = apiData.data;
-
-    const result = tickets
-  .sort((a, b) => a.price - b.price)
-  .slice(0, 3)
-  .map(ticket => ({
-    price: ticket.price,
-    airline: ticket.airline,
-    flight_number: ticket.flight_number,
-    departure_at: ticket.departure_at,
-    return_at: ticket.return_at,
-    link: `https://aviasales.kz/search/${origin}${ticket.departure_at.replace(/-/g, '').slice(0, 8)}${destination}1`
-  }));
-
-    return result;
+    return { tickets };
   } catch (error) {
     process.stdout.write(`Ошибка поиска авиабилетов: ${error.message}\n`);
-    return { error: "Не удалось получить данные по авиабилетам." };
+    return { error: 'Не удалось получить данные по авиабилетам.' };
   }
 };
 
@@ -200,7 +162,6 @@ app.get('/ask', async (req, res) => {
         break;
       } else if (statusRes.data.status === 'requires_action') {
         const toolCalls = statusRes.data.required_action.submit_tool_outputs.tool_calls;
-        process.stdout.write(`📦 Tool calls получены: ${JSON.stringify(toolCalls)}\n`);
         const outputs = [];
 
         for (const call of toolCalls) {
@@ -237,7 +198,7 @@ app.get('/ask', async (req, res) => {
             });
           }
 
-          if (call.function.name === 'get_flights') {
+          if (call.function.name === 'search_flights') {
             let args;
             try {
               args = JSON.parse(call.function.arguments);
@@ -246,7 +207,7 @@ app.get('/ask', async (req, res) => {
               continue;
             }
 
-            const flights = await getFlights(args);
+            const flights = await searchFlights(args.origin, args.destination, args.date);
             outputs.push({
               tool_call_id: call.id,
               output: JSON.stringify(flights),
