@@ -104,36 +104,43 @@ const getFlights = async (args) => {
     const destination = iataTo;
     const token = process.env.TRAVELPAYOUTS_API_KEY;
 
+
     const params = {
       origin,
       destination,
       depart_date: date,
       return_date: returnDate,
       currency: 'KZT',
+      one_way: !returnDate,
+      market: 'ru',
       token: token
-    };
+   };
 
     process.stdout.write(`📡 Запрос в Travelpayouts: ${JSON.stringify(params)}\n`);
     process.stdout.write(`🔍 Готов к отправке запроса в Travelpayouts\n`);
 
-    const response = await axios.get('https://api.travelpayouts.com/v1/prices/cheap', { params });
+    const response = await axios.get('https://api.travelpayouts.com/aviasales/v3/prices_for_dates', { params });
+    process.stdout.write(`📬 Ответ от Travelpayouts: ${JSON.stringify(response.data)}\n`);
 
-    const tickets = response.data?.data?.[destination]?.[date];
+    const apiData = response.data;
 
-    if (!tickets) {
-      throw new Error('Нет билетов');
-    }
+    if (!apiData.success || !Array.isArray(apiData.data) || apiData.data.length === 0) {
+     throw new Error('Ответ от API неуспешен или билеты не найдены');
+   }
 
-    const result = Object.values(tickets)
-      .sort((a, b) => a.value - b.value)
-      .slice(0, 3)
-      .map(ticket => ({
-        price: ticket.value,
-        airline: ticket.airline,
-        flight_number: ticket.flight_number,
-        departure_at: ticket.departure_at,
-        link: `https://aviasales.kz/search/${origin}${date.replace(/-/g, '')}${destination}1`
-      }));
+    const tickets = apiData.data;
+
+    const result = tickets
+  .sort((a, b) => a.price - b.price)
+  .slice(0, 3)
+  .map(ticket => ({
+    price: ticket.price,
+    airline: ticket.airline,
+    flight_number: ticket.flight_number,
+    departure_at: ticket.departure_at,
+    return_at: ticket.return_at,
+    link: `https://aviasales.kz/search/${origin}${ticket.departure_at.replace(/-/g, '').slice(0, 8)}${destination}1`
+  }));
 
     return result;
   } catch (error) {
