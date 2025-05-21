@@ -116,16 +116,43 @@ const getWeather = async (location, unit) => {
   const month = `${d.getMonth() + 1}`.padStart(2, '0');
   return `${day}${month}`;
 };
-    
-    const tickets = response.data.data.slice(0, 3).map(ticket => ({
-      price: ticket.price,
-      airline: ticket.airline,
-      departure_at: ticket.departure_at,
-      return_at: ticket.return_at,
-      transfers: ticket.transfers,
-      link: `https://aviasales.kz/search/${origin}${formatDate(ticket.departure_at)}${destination}${ticket.return_at ? formatDate(ticket.return_at) : ''}1`  
-    }));
+    const allTickets = response.data.data;
 
+// Сортируем по цене по возрастанию
+const sortedTickets = allTickets.sort((a, b) => a.price - b.price);
+
+// Отбираем прямые рейсы
+const directOnly = sortedTickets.filter(ticket => ticket.transfers === 0);
+
+// Берем до 3 самых дешевых прямых
+const topTickets = directOnly.slice(0, 3);
+
+// Формируем итоговый список
+let tickets = topTickets.map(ticket => ({
+  price: ticket.price,
+  airline: ticket.airline,
+  departure_at: ticket.departure_at,
+  return_at: ticket.return_at,
+  transfers: ticket.transfers,
+  link: `https://aviasales.kz/search/${origin}${destination}${date.replace(/-/g, '')}1`
+}));
+
+// Если прямых рейсов меньше 3 — дополняем пересадками
+if (tickets.length < 3) {
+  const remaining = 3 - tickets.length;
+  const withTransfers = sortedTickets.filter(ticket => ticket.transfers > 0);
+  const extraTickets = withTransfers.slice(0, remaining).map(ticket => ({
+    price: ticket.price,
+    airline: ticket.airline,
+    departure_at: ticket.departure_at,
+    return_at: ticket.return_at,
+    transfers: ticket.transfers,
+    link: `https://aviasales.kz/search/${origin}${formatDate(ticket.departure_at)}${destination}${ticket.return_at ? formatDate(ticket.return_at) : ''}1`
+  }));
+
+  tickets = tickets.concat(extraTickets);
+}
+    
     return { tickets };
   } catch (error) {
     process.stdout.write(`Ошибка поиска авиабилетов: ${error.message}\n`);
