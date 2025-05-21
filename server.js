@@ -163,7 +163,7 @@ const finalTickets = selected.slice(0, 3).map(ticket => ({
   link: `https://aviasales.kz/search/${origin}${formatDate(ticket.departure_at)}${destination}${ticket.return_at ? formatDate(ticket.return_at) : ''}1`
 }));
     
-    return { tickets };
+    return { tickets: finalTickets };
   } catch (error) {
     process.stdout.write(`Ошибка поиска авиабилетов: ${error.message}\n`);
     return { error: 'Не удалось получить данные по авиабилетам.' };
