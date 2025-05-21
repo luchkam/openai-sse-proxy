@@ -117,21 +117,22 @@ const formatDate = (isoString) => {
   return `${day}${month}`;
 };
 
-// Удалим дубликаты (по паре: departure_at + return_at)
+// Сортируем весь список по цене
+response.data.data.sort((a, b) => a.price - b.price);
+
+// Удаляем дубликаты по времени и цене
 const uniqueTickets = [];
 const seen = new Set();
 for (const ticket of response.data.data) {
-  const key = `${ticket.departure_at}_${ticket.return_at}`;
+  const key = `${ticket.departure_at}_${ticket.return_at}_${ticket.price}`;
   if (!seen.has(key)) {
     seen.add(key);
     uniqueTickets.push(ticket);
   }
 }
 
-// Группируем билеты по числу пересадок
-const byTransfers = {
-  0: [], 1: [], 2: [], more: []
-};
+// Группируем по количеству пересадок
+const byTransfers = { 0: [], 1: [], 2: [], more: [] };
 for (const ticket of uniqueTickets) {
   if (ticket.transfers === 0) byTransfers[0].push(ticket);
   else if (ticket.transfers === 1) byTransfers[1].push(ticket);
@@ -139,21 +140,20 @@ for (const ticket of uniqueTickets) {
   else byTransfers.more.push(ticket);
 }
 
-// Сортируем внутри групп по возрастанию цены
+// Сортируем каждую группу по цене
 for (const group in byTransfers) {
   byTransfers[group].sort((a, b) => a.price - b.price);
 }
-uniqueTickets.sort((a, b) => a.price - b.price); // Все билеты — тоже сортируем
 
-// Начинаем сбор по приоритету
+// Собираем в нужном порядке
 const selected = [];
-if (uniqueTickets.length) selected.push(uniqueTickets[0]); // 🔹 Самый дешевый вообще
-if (byTransfers[0].length) selected.push(byTransfers[0][0]); // 🔹 Прямой
-if (byTransfers[1].length) selected.push(byTransfers[1][0]);
-else if (byTransfers[2].length) selected.push(byTransfers[2][0]);
-else if (byTransfers.more.length) selected.push(byTransfers.more[0]);
+if (uniqueTickets.length) selected.push(uniqueTickets[0]);        // Самый дешевый
+if (byTransfers[0].length) selected.push(byTransfers[0][0]);       // Прямой
+if (byTransfers[1].length) selected.push(byTransfers[1][0]);       // 1 пересадка
+else if (byTransfers[2].length) selected.push(byTransfers[2][0]);  // 2 пересадки
+else if (byTransfers.more.length) selected.push(byTransfers.more[0]); // 3+
 
-// Обрезаем до 3-х
+// Обрезаем и форматируем
 const finalTickets = selected.slice(0, 3).map(ticket => ({
   price: ticket.price,
   airline: ticket.airline,
