@@ -116,7 +116,7 @@ const getWeather = async (location, unit) => {
       departure_at: ticket.departure_at,
       return_at: ticket.return_at,
       transfers: ticket.transfers,
-      link: `https://aviasales.kz/search/${origin}${destination}${date.replace(/-/g, '')}1` // базовая ссылка
+      link: `https://aviasales.kz/search/${origin}${destination}${depart_date.replace(/-/g, '')}1` // базовая ссылка
     }));
 
     return { tickets };
