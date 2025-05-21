@@ -110,38 +110,51 @@ const getWeather = async (location, unit) => {
 
     process.stdout.write(`📥 Ответ от Travelpayouts: ${JSON.stringify(response.data)}\n`);
 
-    const formatDate = (iso) => {
-  const d = new Date(iso);
-  const localDate = new Date(d.getTime() + d.getTimezoneOffset() * 60000); // учитываем локальное время
-  const day = `${localDate.getDate()}`.padStart(2, '0');
-  const month = `${localDate.getMonth() + 1}`.padStart(2, '0');
+    // ⏱️ Функция форматирования без смещения по часовому поясу
+const formatDate = (isoString) => {
+  const [datePart] = isoString.split('T'); // Берем только yyyy-mm-dd
+  const [year, month, day] = datePart.split('-');
   return `${day}${month}`;
 };
-    const allTickets = response.data.data;
 
-// Сортируем по цене по возрастанию
-const sortedTickets = allTickets.sort((a, b) => a.price - b.price);
-
-    // Удаляем дубликаты по дате вылета, возврата и цене
+// Удалим дубликаты (по паре: departure_at + return_at)
 const uniqueTickets = [];
 const seen = new Set();
-
-for (const ticket of sortedTickets) {
-  const key = `${ticket.departure_at}_${ticket.return_at}_${ticket.price}`;
+for (const ticket of response.data.data) {
+  const key = `${ticket.departure_at}_${ticket.return_at}`;
   if (!seen.has(key)) {
     seen.add(key);
     uniqueTickets.push(ticket);
   }
 }
 
-// Отбираем прямые рейсы
-const directOnly = uniqueTickets.filter(ticket => ticket.transfers === 0);
+// Группируем билеты по числу пересадок
+const byTransfers = {
+  0: [], 1: [], 2: [], more: []
+};
+for (const ticket of uniqueTickets) {
+  if (ticket.transfers === 0) byTransfers[0].push(ticket);
+  else if (ticket.transfers === 1) byTransfers[1].push(ticket);
+  else if (ticket.transfers === 2) byTransfers[2].push(ticket);
+  else byTransfers.more.push(ticket);
+}
 
-// Берем до 3 самых дешевых прямых
-const topTickets = directOnly.slice(0, 3);
+// Сортируем внутри групп по возрастанию цены
+for (const group in byTransfers) {
+  byTransfers[group].sort((a, b) => a.price - b.price);
+}
+uniqueTickets.sort((a, b) => a.price - b.price); // Все билеты — тоже сортируем
 
-// Формируем итоговый список
-let tickets = topTickets.map(ticket => ({
+// Начинаем сбор по приоритету
+const selected = [];
+if (uniqueTickets.length) selected.push(uniqueTickets[0]); // 🔹 Самый дешевый вообще
+if (byTransfers[0].length) selected.push(byTransfers[0][0]); // 🔹 Прямой
+if (byTransfers[1].length) selected.push(byTransfers[1][0]);
+else if (byTransfers[2].length) selected.push(byTransfers[2][0]);
+else if (byTransfers.more.length) selected.push(byTransfers.more[0]);
+
+// Обрезаем до 3-х
+const finalTickets = selected.slice(0, 3).map(ticket => ({
   price: ticket.price,
   airline: ticket.airline,
   departure_at: ticket.departure_at,
@@ -149,22 +162,6 @@ let tickets = topTickets.map(ticket => ({
   transfers: ticket.transfers,
   link: `https://aviasales.kz/search/${origin}${formatDate(ticket.departure_at)}${destination}${ticket.return_at ? formatDate(ticket.return_at) : ''}1`
 }));
-
-// Если прямых рейсов меньше 3 — дополняем пересадками
-if (tickets.length < 3) {
-  const remaining = 3 - tickets.length;
-  const withTransfers = uniqueTickets.filter(ticket => ticket.transfers > 0);
-  const extraTickets = withTransfers.slice(0, remaining).map(ticket => ({
-    price: ticket.price,
-    airline: ticket.airline,
-    departure_at: ticket.departure_at,
-    return_at: ticket.return_at,
-    transfers: ticket.transfers,
-    link: `https://aviasales.kz/search/${origin}${formatDate(ticket.departure_at)}${destination}${ticket.return_at ? formatDate(ticket.return_at) : ''}1`
-  }));
-
-  tickets = tickets.concat(extraTickets);
-}
     
     return { tickets };
   } catch (error) {
