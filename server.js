@@ -112,8 +112,9 @@ const getWeather = async (location, unit) => {
 
     const formatDate = (iso) => {
   const d = new Date(iso);
-  const day = `${d.getDate()}`.padStart(2, '0');
-  const month = `${d.getMonth() + 1}`.padStart(2, '0');
+  const localDate = new Date(d.getTime() + d.getTimezoneOffset() * 60000); // учитываем локальное время
+  const day = `${localDate.getDate()}`.padStart(2, '0');
+  const month = `${localDate.getMonth() + 1}`.padStart(2, '0');
   return `${day}${month}`;
 };
     const allTickets = response.data.data;
@@ -121,8 +122,20 @@ const getWeather = async (location, unit) => {
 // Сортируем по цене по возрастанию
 const sortedTickets = allTickets.sort((a, b) => a.price - b.price);
 
+    // Удаляем дубликаты по дате вылета, возврата и цене
+const uniqueTickets = [];
+const seen = new Set();
+
+for (const ticket of sortedTickets) {
+  const key = `${ticket.departure_at}_${ticket.return_at}_${ticket.price}`;
+  if (!seen.has(key)) {
+    seen.add(key);
+    uniqueTickets.push(ticket);
+  }
+}
+
 // Отбираем прямые рейсы
-const directOnly = sortedTickets.filter(ticket => ticket.transfers === 0);
+const directOnly = uniqueTickets.filter(ticket => ticket.transfers === 0);
 
 // Берем до 3 самых дешевых прямых
 const topTickets = directOnly.slice(0, 3);
@@ -140,7 +153,7 @@ let tickets = topTickets.map(ticket => ({
 // Если прямых рейсов меньше 3 — дополняем пересадками
 if (tickets.length < 3) {
   const remaining = 3 - tickets.length;
-  const withTransfers = sortedTickets.filter(ticket => ticket.transfers > 0);
+  const withTransfers = uniqueTickets.filter(ticket => ticket.transfers > 0);
   const extraTickets = withTransfers.slice(0, remaining).map(ticket => ({
     price: ticket.price,
     airline: ticket.airline,
