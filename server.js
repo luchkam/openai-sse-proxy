@@ -109,6 +109,13 @@ const getWeather = async (location, unit) => {
     });
 
     process.stdout.write(`📥 Ответ от Travelpayouts: ${JSON.stringify(response.data)}\n`);
+
+    const formatDate = (iso) => {
+  const d = new Date(iso);
+  const day = `${d.getDate()}`.padStart(2, '0');
+  const month = `${d.getMonth() + 1}`.padStart(2, '0');
+  return `${day}${month}`;
+};
     
     const tickets = response.data.data.slice(0, 3).map(ticket => ({
       price: ticket.price,
@@ -116,7 +123,7 @@ const getWeather = async (location, unit) => {
       departure_at: ticket.departure_at,
       return_at: ticket.return_at,
       transfers: ticket.transfers,
-      link: `https://aviasales.kz/search/${origin}${destination}${depart_date.replace(/-/g, '')}1` // базовая ссылка
+      link: `https://aviasales.kz/search/${origin}${formatDate(ticket.departure_at)}${destination}${ticket.return_at ? formatDate(ticket.return_at) : ''}1`  
     }));
 
     return { tickets };
