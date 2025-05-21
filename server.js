@@ -120,15 +120,24 @@ const formatDate = (isoString) => {
 // Сортируем по цене (сначала все билеты)
 response.data.data.sort((a, b) => a.price - b.price);
 
-// Удаляем дубликаты по комбинации: время вылета, возврата и цена
+// Удаляем дубликаты:
+// 1) если совпадают departure_at + return_at + price
+// 2) или если совпадают только departure_at + return_at
 const uniqueTickets = [];
 const seen = new Set();
+const seenTimes = new Set();
+
 for (const ticket of response.data.data) {
-  const key = `${ticket.departure_at}_${ticket.return_at}_${ticket.price}`;
-  if (!seen.has(key)) {
-    seen.add(key);
-    uniqueTickets.push(ticket);
+  const fullKey = `${ticket.departure_at}_${ticket.return_at}_${ticket.price}`;
+  const timeKey = `${ticket.departure_at}_${ticket.return_at}`;
+
+  if (seen.has(fullKey) || seenTimes.has(timeKey)) {
+    continue; // дубликат — пропускаем
   }
+
+  seen.add(fullKey);      // добавляем полную комбинацию
+  seenTimes.add(timeKey); // и комбинацию только по времени
+  uniqueTickets.push(ticket);
 }
 
 // Отбираем до 3 самых дешёвых билетов
