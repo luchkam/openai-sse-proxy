@@ -83,28 +83,27 @@ const getWeather = async (location, unit) => {
 };
 
 // Функция поиска авиабилетов
-const searchFlights = async (origin, destination, date) => {
+const searchFlights = async (origin, destination, depart_date, return_date = null) => {
   try {
-    process.stdout.write(`📡 Отправляем запрос в Travelpayouts с параметрами: ${JSON.stringify({
-  origin,
-  destination,
-  departure_at: date,
-  one_way: true,
-  currency: 'KZT',
-  market: 'kz',
-  limit: 3
-})}\n`);
     const response = await axios.get('https://api.travelpayouts.com/aviasales/v3/prices_for_dates', {
-      params: {
+      const params = {
   origin,
   destination,
-  departure_at: date,
-  one_way: true,
+  departure_at: depart_date,
   currency: 'KZT',
   market: 'kz',
   limit: 3,
   token: process.env.TRAVELPAYOUTS_API_KEY
+};
+
+if (return_date) {
+  params.return_at = return_date;
+  params.one_way = false;
+} else {
+  params.one_way = true;
 }
+
+process.stdout.write(`📡 Отправляем запрос в Travelpayouts с параметрами: ${JSON.stringify(params)}\n`);
     });
 
     process.stdout.write(`📥 Ответ от Travelpayouts: ${JSON.stringify(response.data)}\n`);
@@ -222,7 +221,7 @@ app.get('/ask', async (req, res) => {
               continue;
             }
 
-            const flights = await searchFlights(args.origin, args.destination, args.depart_date);
+            const flights = await searchFlights(args.origin, args.destination, args.depart_date, args.return_date);  
             outputs.push({
               tool_call_id: call.id,
               output: JSON.stringify(flights),
