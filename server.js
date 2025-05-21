@@ -117,10 +117,10 @@ const formatDate = (isoString) => {
   return `${day}${month}`;
 };
 
-// Сортируем весь список по цене
+// Сортируем по цене (сначала все билеты)
 response.data.data.sort((a, b) => a.price - b.price);
 
-// Удаляем дубликаты по времени и цене
+// Удаляем дубликаты по комбинации: время вылета, возврата и цена
 const uniqueTickets = [];
 const seen = new Set();
 for (const ticket of response.data.data) {
@@ -131,30 +131,8 @@ for (const ticket of response.data.data) {
   }
 }
 
-// Группируем по количеству пересадок
-const byTransfers = { 0: [], 1: [], 2: [], more: [] };
-for (const ticket of uniqueTickets) {
-  if (ticket.transfers === 0) byTransfers[0].push(ticket);
-  else if (ticket.transfers === 1) byTransfers[1].push(ticket);
-  else if (ticket.transfers === 2) byTransfers[2].push(ticket);
-  else byTransfers.more.push(ticket);
-}
-
-// Сортируем каждую группу по цене
-for (const group in byTransfers) {
-  byTransfers[group].sort((a, b) => a.price - b.price);
-}
-
-// Собираем в нужном порядке
-const selected = [];
-if (uniqueTickets.length) selected.push(uniqueTickets[0]);        // Самый дешевый
-if (byTransfers[0].length) selected.push(byTransfers[0][0]);       // Прямой
-if (byTransfers[1].length) selected.push(byTransfers[1][0]);       // 1 пересадка
-else if (byTransfers[2].length) selected.push(byTransfers[2][0]);  // 2 пересадки
-else if (byTransfers.more.length) selected.push(byTransfers.more[0]); // 3+
-
-// Обрезаем и форматируем
-const finalTickets = selected.slice(0, 3).map(ticket => ({
+// Отбираем до 3 самых дешёвых билетов
+const finalTickets = uniqueTickets.slice(0, 3).map(ticket => ({
   price: ticket.price,
   airline: ticket.airline,
   departure_at: ticket.departure_at,
