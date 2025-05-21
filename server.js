@@ -91,7 +91,7 @@ const getWeather = async (location, unit) => {
       departure_at: depart_date,
       currency: 'KZT',
       market: 'kz',
-      limit: 3,
+      limit: 30,
       token: process.env.TRAVELPAYOUTS_API_KEY
     };
 
