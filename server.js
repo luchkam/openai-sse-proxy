@@ -90,6 +90,7 @@ const getWeather = async (location, unit) => {
       destination,
       departure_at: depart_date,
       currency: 'KZT',
+      market: 'kz',
       limit: 30,
       token: process.env.TRAVELPAYOUTS_API_KEY
     };
@@ -103,42 +104,41 @@ const getWeather = async (location, unit) => {
 
     process.stdout.write(`📡 Отправляем запрос в Travelpayouts (prices_for_dates) с параметрами: ${JSON.stringify(params)}\n`);
 
-    const response = await axios.get('https://api.travelpayouts.com/aviasales/v3/prices_for_dates', {
-      params
-    });
+    let response = await axios.get('https://api.travelpayouts.com/aviasales/v3/prices_for_dates', { params });
+    let tickets = response.data.data || [];
 
-    let tickets = response.data.data;
+    // Если билеты не найдены — пробуем fallback
+    if (!tickets.length) {
+      process.stdout.write('⚠️ Нет результатов в prices_for_dates — пробуем get_latest_prices\n');
 
-    // Если ничего не вернуло — пробуем fallback: grouped_prices
-    if (!tickets || tickets.length === 0) {
-      process.stdout.write(`⚠️ Нет результатов в prices_for_dates — пробуем grouped_prices\n`);
-      const backupResponse = await axios.get('https://api.travelpayouts.com/aviasales/v3/grouped_prices', {
-        params: {
-          ...params,
-          group_by: 'departure_at'
-        }
-      });
+      const fallbackParams = {
+        origin,
+        destination,
+        beginning_of_period: depart_date,
+        period_type: 'month',
+        one_way: !return_date,
+        currency: 'KZT',
+        token: process.env.TRAVELPAYOUTS_API_KEY
+      };
 
-      // Преобразуем объект в массив
-      tickets = Object.values(backupResponse.data.data);
+      const fallbackRes = await axios.get('https://api.travelpayouts.com/aviasales/v3/get_latest_prices', { params: fallbackParams });
+      tickets = fallbackRes.data.data || [];
     }
 
     process.stdout.write(`📥 Всего получено билетов: ${tickets.length}\n`);
 
-    // ⏱️ Функция форматирования без смещения по часовому поясу
     const formatDate = (isoString) => {
       const [datePart] = isoString.split('T');
       const [year, month, day] = datePart.split('-');
       return `${day}${month}`;
     };
 
-    // Сортируем по цене
+    // Сортировка по цене
     tickets.sort((a, b) => a.price - b.price);
 
-    // Удаляем дубликаты
+    // Удаление дубликатов
     const seen = new Set();
     const uniqueTickets = [];
-
     for (const ticket of tickets) {
       const key = `${ticket.departure_at}_${ticket.return_at}_${ticket.price}`;
       if (!seen.has(key)) {
@@ -147,7 +147,6 @@ const getWeather = async (location, unit) => {
       }
     }
 
-    // Оставляем только до 3 вариантов
     const finalTickets = uniqueTickets.slice(0, 3).map(ticket => ({
       price: ticket.price,
       airline: ticket.airline,
