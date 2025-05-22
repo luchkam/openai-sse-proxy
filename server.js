@@ -127,6 +127,7 @@ const seen = new Set();
 const uniqueTickets = [];
     
 for (const ticket of response.data.data) {
+  const fullKey = `${ticket.departure_at}_${ticket.return_at}_${ticket.price}`;
   const key = `${ticket.departure_at}_${ticket.return_at}_${ticket.price}`;
   if (!seen.has(key)) {
     seen.add(key);
