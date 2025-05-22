@@ -147,14 +147,33 @@ const getWeather = async (location, unit) => {
       }
     }
 
-    const finalTickets = uniqueTickets.slice(0, 3).map(ticket => ({
-      price: ticket.price,
-      airline: ticket.airline,
-      departure_at: ticket.departure_at,
-      return_at: ticket.return_at,
-      transfers: ticket.transfers,
-      link: `https://aviasales.kz/search/${origin}${formatDate(ticket.departure_at)}${destination}${ticket.return_at ? formatDate(ticket.return_at) : ''}1`
-    }));
+    // Группируем билеты по дате вылета и возврата
+const groupedByDates = {};
+for (const ticket of uniqueTickets) {
+  const key = `${ticket.departure_at}_${ticket.return_at}`;
+  if (!groupedByDates[key]) {
+    groupedByDates[key] = [];
+  }
+  groupedByDates[key].push(ticket);
+}
+
+// Для каждой группы оставляем только самый дешевый билет
+const filteredTickets = Object.values(groupedByDates).map(group => {
+  return group.reduce((min, ticket) => ticket.price < min.price ? ticket : min);
+});
+
+// Сортируем по цене и берём до 3 штук
+const finalTickets = filteredTickets
+  .sort((a, b) => a.price - b.price)
+  .slice(0, 3)
+  .map(ticket => ({
+    price: ticket.price,
+    airline: ticket.airline,
+    departure_at: ticket.departure_at,
+    return_at: ticket.return_at,
+    transfers: ticket.transfers,
+    link: `https://aviasales.kz/search/${origin}${formatDate(ticket.departure_at)}${destination}${ticket.return_at ? formatDate(ticket.return_at) : ''}1`
+  }));
 
     return { tickets: finalTickets };
   } catch (error) {
