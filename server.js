@@ -195,6 +195,31 @@ app.get('/ask', async (req, res) => {
       }
     );
 
+    // ⏳ Таймер-проверка на случай, если ассистент не ответит
+setTimeout(async () => {
+  process.stdout.write('⏳ Проверка: есть ли новое сообщение от ассистента спустя 10 секунд...\n');
+  try {
+    const messagesRes = await axios.get(
+      `https://api.openai.com/v1/threads/${threadId}/messages`,
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          'OpenAI-Beta': 'assistants=v2',
+        },
+      }
+    );
+
+    const last = messagesRes.data.data.find((m) => m.role === 'assistant');
+    if (last) {
+      process.stdout.write('✅ Ответ ассистента всё-таки появился позже\n');
+    } else {
+      process.stdout.write('⚠️ Ответа от ассистента нет даже после таймаута\n');
+    }
+  } catch (err) {
+    process.stdout.write(`❌ Ошибка при ручной проверке сообщений: ${err.message}\n`);
+  }
+}, 10000); // 10 секунд ожидания, можно увеличить до 12000–15000 при необходимости
+    
     const runId = run.data.id;
 
     let completed = false;
@@ -281,31 +306,6 @@ app.get('/ask', async (req, res) => {
             }
           );
           process.stdout.write('✅ submit_tool_outputs успешно отправлены\n');
-        // 🔁 Через 10 секунд проверим, появился ли ответ от ассистента
-setTimeout(async () => {
-  process.stdout.write('⏳ Проверка: есть ли новое сообщение от ассистента спустя 10 секунд...\n');
-
-  try {
-    const messagesCheck = await axios.get(
-      `https://api.openai.com/v1/threads/${threadId}/messages`,
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-          'OpenAI-Beta': 'assistants=v2',
-        },
-      }
-    );
-
-    const lastMsg = messagesCheck.data.data.find((m) => m.role === 'assistant');
-    if (lastMsg) {
-      process.stdout.write('✅ Ответ ассистента всё-таки появился позже\n');
-    } else {
-      process.stdout.write('⚠️ Ответ ассистента не появился. Возможно, зависание после submit_tool_outputs\n');
-    }
-  } catch (err) {
-    process.stdout.write(`❌ Ошибка при проверке сообщений: ${err.message}\n`);
-  }
-}, 10000); // ⏱ 10 секунд ожидания  
         } catch (err) {
           process.stdout.write(`❌ Ошибка отправки tool_outputs: ${err.message}\n`);
         }
