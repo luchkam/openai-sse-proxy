@@ -147,14 +147,18 @@ const getWeather = async (location, unit) => {
       }
     }
 
-    const finalTickets = uniqueTickets.slice(0, 3).map(ticket => ({
-      price: ticket.price,
-      airline: ticket.airline,
-      departure_at: ticket.departure_at,
-      return_at: ticket.return_at,
-      transfers: ticket.transfers,
-      link: `https://tp.media/r?marker=${process.env.TRAVELPAYOUTS_MARKER}&u=${encodeURIComponent(`https://aviasales.kz/search/${origin}${formatDate(ticket.departure_at)}${destination}${ticket.return_at ? formatDate(ticket.return_at) : ''}1`)}`
-    }));
+    const finalTickets = uniqueTickets.slice(0, 3).map(ticket => {
+  const plainUrl = `https://aviasales.kz/search/${origin}${formatDate(ticket.departure_at)}${destination}${ticket.return_at ? formatDate(ticket.return_at) : ''}1`;
+  const partnerLink = `https://tp.media/r?marker=${process.env.TRAVELPAYOUTS_MARKER}&u=${encodeURIComponent(plainUrl)}`;
+  return {
+    price: ticket.price,
+    airline: ticket.airline,
+    departure_at: ticket.departure_at,
+    return_at: ticket.return_at,
+    transfers: ticket.transfers,
+    link: `[Перейти по ссылке](${partnerLink})`
+  };
+});
 
     return { tickets: finalTickets };
   } catch (error) {
