@@ -299,7 +299,7 @@ app.get('/ask', async (req, res) => {
       }
     );
 
-    process.stdout.write(`📩 messagesRes: ${JSON.stringify(messagesRes.data)}\n`);
+    process.stdout.write(`🧾 ВСЕ СООБЩЕНИЯ В ПОТОКЕ: ${JSON.stringify(messagesRes.data)}\n`);
 
     const last = messagesRes.data.data.find((m) => m.role === 'assistant');
     process.stdout.write(`📤 Ответ ассистента: ${JSON.stringify(last)}\n`);
