@@ -90,7 +90,6 @@ const getWeather = async (location, unit) => {
       destination,
       departure_at: depart_date,
       currency: 'KZT',
-      market: 'kz',
       limit: 30,
       token: process.env.TRAVELPAYOUTS_API_KEY
     };
@@ -102,48 +101,62 @@ const getWeather = async (location, unit) => {
       params.one_way = true;
     }
 
-    process.stdout.write(`📡 Отправляем запрос в Travelpayouts с параметрами: ${JSON.stringify(params)}\n`);
+    process.stdout.write(`📡 Отправляем запрос в Travelpayouts (prices_for_dates) с параметрами: ${JSON.stringify(params)}\n`);
 
     const response = await axios.get('https://api.travelpayouts.com/aviasales/v3/prices_for_dates', {
       params
     });
 
-    process.stdout.write(`📥 Ответ от Travelpayouts: ${JSON.stringify(response.data)}\n`);
+    let tickets = response.data.data;
+
+    // Если ничего не вернуло — пробуем fallback: grouped_prices
+    if (!tickets || tickets.length === 0) {
+      process.stdout.write(`⚠️ Нет результатов в prices_for_dates — пробуем grouped_prices\n`);
+      const backupResponse = await axios.get('https://api.travelpayouts.com/aviasales/v3/grouped_prices', {
+        params: {
+          ...params,
+          group_by: 'departure_at'
+        }
+      });
+
+      // Преобразуем объект в массив
+      tickets = Object.values(backupResponse.data.data);
+    }
+
+    process.stdout.write(`📥 Всего получено билетов: ${tickets.length}\n`);
 
     // ⏱️ Функция форматирования без смещения по часовому поясу
-const formatDate = (isoString) => {
-  const [datePart] = isoString.split('T'); // Берем только yyyy-mm-dd
-  const [year, month, day] = datePart.split('-');
-  return `${day}${month}`;
-};
+    const formatDate = (isoString) => {
+      const [datePart] = isoString.split('T');
+      const [year, month, day] = datePart.split('-');
+      return `${day}${month}`;
+    };
 
-// Сортируем по цене (сначала все билеты)
-response.data.data.sort((a, b) => a.price - b.price);
+    // Сортируем по цене
+    tickets.sort((a, b) => a.price - b.price);
 
-// Удаляем дубликаты:
-// 1) если совпадают departure_at + return_at + price
-// 2) или если совпадают только departure_at + return_at
-const seen = new Set();
-const uniqueTickets = [];
+    // Удаляем дубликаты
+    const seen = new Set();
+    const uniqueTickets = [];
 
-for (const ticket of response.data.data) {
-  const key = `${ticket.departure_at}_${ticket.return_at}_${ticket.price}`;
-  if (!seen.has(key)) {
-    seen.add(key);
-    uniqueTickets.push(ticket);
-  }
-}
+    for (const ticket of tickets) {
+      const key = `${ticket.departure_at}_${ticket.return_at}_${ticket.price}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        uniqueTickets.push(ticket);
+      }
+    }
 
-// Отбираем до 3 самых дешёвых билетов
-const finalTickets = uniqueTickets.slice(0, 3).map(ticket => ({
-  price: ticket.price,
-  airline: ticket.airline,
-  departure_at: ticket.departure_at,
-  return_at: ticket.return_at,
-  transfers: ticket.transfers,
-  link: `https://aviasales.kz/search/${origin}${formatDate(ticket.departure_at)}${destination}${ticket.return_at ? formatDate(ticket.return_at) : ''}1`
-}));
-    
+    // Оставляем только до 3 вариантов
+    const finalTickets = uniqueTickets.slice(0, 3).map(ticket => ({
+      price: ticket.price,
+      airline: ticket.airline,
+      departure_at: ticket.departure_at,
+      return_at: ticket.return_at,
+      transfers: ticket.transfers,
+      link: `https://aviasales.kz/search/${origin}${formatDate(ticket.departure_at)}${destination}${ticket.return_at ? formatDate(ticket.return_at) : ''}1`
+    }));
+
     return { tickets: finalTickets };
   } catch (error) {
     process.stdout.write(`Ошибка поиска авиабилетов: ${error.message}\n`);
