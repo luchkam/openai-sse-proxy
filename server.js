@@ -123,17 +123,16 @@ response.data.data.sort((a, b) => a.price - b.price);
 // Удаляем дубликаты:
 // 1) если совпадают departure_at + return_at + price
 // 2) или если совпадают только departure_at + return_at
-const uniqueTickets = [];
 const seen = new Set();
-const seenTimes = new Set();
-
+const uniqueTickets = [];
+    
 for (const ticket of response.data.data) {
-  const fullKey = `${ticket.departure_at}_${ticket.return_at}_${ticket.price}`;
-  const timeKey = `${ticket.departure_at}_${ticket.return_at}`;
-
-  if (seen.has(fullKey) || seenTimes.has(timeKey)) {
-    continue; // дубликат — пропускаем
+  const key = `${ticket.departure_at}_${ticket.return_at}_${ticket.price}`;
+  if (!seen.has(key)) {
+    seen.add(key);
+    uniqueTickets.push(ticket);
   }
+}
 
   seen.add(fullKey);      // добавляем полную комбинацию
   seenTimes.add(timeKey); // и комбинацию только по времени
