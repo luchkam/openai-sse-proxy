@@ -132,7 +132,6 @@ for (const ticket of response.data.data) {
     seen.add(key);
     uniqueTickets.push(ticket);
   }
-}
 
   seen.add(fullKey);      // добавляем полную комбинацию
   seenTimes.add(timeKey); // и комбинацию только по времени
