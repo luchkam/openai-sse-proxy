@@ -205,6 +205,10 @@ const searchTours = async (params) => {
       }
     }
 
+    if (!done) {
+  throw new Error('Поиск не завершён, result не запрашивается');
+}
+
     // Шаг 3: Получение результатов
     const resultRes = await axios.get(statusUrl, {
       params: {
