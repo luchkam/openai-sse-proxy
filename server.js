@@ -163,6 +163,72 @@ const getWeather = async (location, unit) => {
   }
 };
 
+// Функция поиска туров через Tourvisor
+const searchTours = async (params) => {
+  try {
+    const searchUrl = 'http://tourvisor.ru/xml/search.php';
+    const statusUrl = 'http://tourvisor.ru/xml/result.php';
+
+    // Шаг 1: запуск поиска и получение requestid
+    const searchRes = await axios.get(searchUrl, {
+      params: {
+        ...params,
+        authlogin: process.env.TOURVISOR_LOGIN,
+        authpass: process.env.TOURVISOR_PASS,
+        format: 'json'
+      }
+    });
+
+    const requestid = searchRes.data?.result?.requestid;
+    if (!requestid) throw new Error('Не получен requestid');
+
+    process.stdout.write(`📩 Получен requestid: ${requestid}\n`);
+
+    // Шаг 2: ожидание завершения поиска (до 7 секунд, максимум 4 попытки с паузой 2 сек)
+    let status, done = false;
+    for (let i = 0; i < 4; i++) {
+      await new Promise(res => setTimeout(res, 2000)); // Пауза 2 сек
+      const statusRes = await axios.get(statusUrl, {
+        params: {
+          authlogin: process.env.TOURVISOR_LOGIN,
+          authpass: process.env.TOURVISOR_PASS,
+          requestid,
+          type: 'status',
+          format: 'json'
+        }
+      });
+      status = statusRes.data?.status;
+      process.stdout.write(`🔄 Статус поиска: ${JSON.stringify(status)}\n`);
+      if (status?.state === 'finished') {
+        done = true;
+        break;
+      }
+    }
+
+    // Шаг 3: Получение результатов
+    const resultRes = await axios.get(statusUrl, {
+      params: {
+        authlogin: process.env.TOURVISOR_LOGIN,
+        authpass: process.env.TOURVISOR_PASS,
+        requestid,
+        type: 'result',
+        format: 'json',
+        onpage: 10
+      }
+    });
+
+    const hotels = resultRes.data?.result?.hotel || [];
+    const top3 = hotels.slice(0, 3); // первые 3 отеля (можно потом менять логику)
+
+    process.stdout.write(`📦 Найдено отелей: ${hotels.length}\n`);
+
+    return { tours: top3 };
+  } catch (err) {
+    process.stdout.write(`❌ Ошибка поиска туров: ${err.message}\n`);
+    return { error: 'Не удалось получить данные по турам.' };
+  }
+};
+
 // SSE endpoint
 app.get('/ask', async (req, res) => {
   const userMessage = req.query.message;
@@ -289,6 +355,23 @@ setTimeout(async () => {
             outputs.push({
               tool_call_id: call.id,
               output: JSON.stringify(flights),
+            });
+          }
+
+          if (call.function.name === 'search_tours') {
+            let args;
+            try {
+              args = JSON.parse(call.function.arguments);
+              process.stdout.write(`🧾 Аргументы от ассистента: ${JSON.stringify(args)}\n`);
+            } catch (err) {
+              process.stdout.write(`⚠️ Ошибка парсинга arguments: ${err.message}\n`);
+              continue;
+            }
+
+            const tours = await searchTours(args);
+            outputs.push({
+              tool_call_id: call.id,
+              output: JSON.stringify(tours),
             });
           }
         }
