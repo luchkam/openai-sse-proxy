@@ -233,7 +233,20 @@ const searchTours = async (params) => {
 
     process.stdout.write(`📦 Найдено отелей: ${hotels.length}\n`);
 
-    return { tours: top3 };
+    return {
+  tours: top3.map(hotel => ({
+    hotelname: hotel.hotelname,
+    price: hotel.price,
+    hoteldescription: hotel.hoteldescription,
+    picturelink: hotel.picturelink,
+    fulldesclink: hotel.fulldesclink,
+    tour: hotel.tours?.tour?.[0] ? {
+      flydate: hotel.tours.tour[0].flydate,
+      mealrussian: hotel.tours.tour[0].mealrussian,
+    } : null
+  }))
+};
+    
   } catch (err) {
     process.stdout.write(`❌ Ошибка поиска туров: ${err.message}\n`);
     return { error: 'Не удалось получить данные по турам.' };
