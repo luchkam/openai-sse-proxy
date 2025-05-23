@@ -238,6 +238,7 @@ const searchTours = async (params) => {
     const cheapestTour = hotel.tours?.tour?.[0];
     return {
       hotelname: hotel.hotelname,
+      hotelstars: hotel.hotelstars,
       price: hotel.price,
       hoteldescription: hotel.hoteldescription,
       mealrussian: cheapestTour?.mealrussian || null,
