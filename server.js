@@ -184,10 +184,10 @@ const searchTours = async (params) => {
 
     process.stdout.write(`📩 Получен requestid: ${requestid}\n`);
 
-    // Шаг 2: ожидание завершения поиска (до 7 секунд, максимум 4 попытки с паузой 2 сек)
+    // Шаг 2: ожидание завершения поиска (до 7 секунд, максимум 5 попытки с паузой 3 сек)
     let status, done = false;
-    for (let i = 0; i < 4; i++) {
-      await new Promise(res => setTimeout(res, 2000)); // Пауза 2 сек
+    for (let i = 0; i < 5; i++) {
+      await new Promise(res => setTimeout(res, 3000)); // Пауза 3 сек
       const statusRes = await axios.get(statusUrl, {
         params: {
           authlogin: process.env.TOURVISOR_LOGIN,
@@ -198,11 +198,18 @@ const searchTours = async (params) => {
         }
       });
       status = statusRes.data?.status;
-      process.stdout.write(`🔄 Статус поиска: ${JSON.stringify(status)}\n`);
-      if (status?.state === 'finished') {
-        done = true;
-        break;
-      }
+  process.stdout.write(`📥 Сырой ответ от статуса: ${JSON.stringify(statusRes.data)}\n`);
+
+  if (!status || typeof status.state === 'undefined') {
+    process.stdout.write('⚠️ Status пустой или не содержит поле state, пробуем ещё раз...\n');
+    continue;
+  }
+
+  process.stdout.write(`🔄 Статус поиска: ${JSON.stringify(status)}\n`);
+  if (status?.state === 'finished') {
+    done = true;
+    break;
+  }
     }
 
     if (!done) {
