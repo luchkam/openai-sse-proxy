@@ -228,7 +228,7 @@ const searchTours = async (params) => {
       }
     });
 
-    const hotels = resultRes.data?.result?.hotel || [];
+    const hotels = resultRes.data?.data?.result?.hotel || [];
     const top3 = hotels.slice(0, 3); // первые 3 отеля (можно потом менять логику)
 
     process.stdout.write(`📦 Найдено отелей: ${hotels.length}\n`);
