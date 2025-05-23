@@ -197,8 +197,8 @@ const searchTours = async (params) => {
           format: 'json'
         }
       });
-      status = statusRes.data?.status;
-  process.stdout.write(`📥 Сырой ответ от статуса: ${JSON.stringify(statusRes.data)}\n`);
+      status = statusRes.data?.data?.status;
+  process.stdout.write(`📥 Сырой ответ от статуса: ${JSON.stringify(statusRes.data?.data)}\n`);
 
   if (!status || typeof status.state === 'undefined') {
     process.stdout.write('⚠️ Status пустой или не содержит поле state, пробуем ещё раз...\n');
